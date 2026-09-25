@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Pallet Count</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+:root{
+  --bg:#EEF1F5; --card:#FFFFFF; --ink:#16202B; --muted:#5B6775; --line:#D3DAE2;
+  --film:#2463AE; --film-ink:#FFFFFF; --beam:#EE7A22;
+  --ok:#1E8A4C; --ok-bg:#E3F4EA; --warn:#B87E00; --warn-bg:#FBF1D6; --bad:#C4352B; --bad-bg:#FBE4E2;
+  --info-bg:#E4EDF8;
+  --sans:"Barlow","PingFang HK","Noto Sans HK","Microsoft JhengHei",system-ui,sans-serif;
+  --cond:"Barlow Condensed","Barlow","PingFang HK","Noto Sans HK",system-ui,sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F1720; --card:#18222E; --ink:#E8EDF3; --muted:#98A4B3; --line:#2A3746;
+    --film:#4F8DD6; --film-ink:#0F1720; --beam:#F28C3C;
+    --ok:#3DBA73; --ok-bg:#15301F; --warn:#E3A91C; --warn-bg:#33290F; --bad:#E0584C; --bad-bg:#3A1A18;
+    --info-bg:#1A2A3D;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F1720; --card:#18222E; --ink:#E8EDF3; --muted:#98A4B3; --line:#2A3746;
+  --film:#4F8DD6; --film-ink:#0F1720; --beam:#F28C3C;
+  --ok:#3DBA73; --ok-bg:#15301F; --warn:#E3A91C; --warn-bg:#33290F; --bad:#E0584C; --bad-bg:#3A1A18;
+  --info-bg:#1A2A3D;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}
+body{padding-bottom:84px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--film);outline-offset:2px}
+.wrap{max-width:640px;margin:0 auto;padding:12px 14px}
+h1,h2,h3{margin:0;font-weight:600;line-height:1.2}
+h2{font-size:1.15rem;margin:18px 0 8px}
+p{margin:6px 0}
+.muted{color:var(--muted)}
+.small{font-size:.875rem}
+.hidden{display:none!important}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:46px;padding:0 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);font-weight:600}
+.btn.primary{background:var(--film);border-color:var(--film);color:var(--film-ink)}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.block{width:100%}
+.btn:disabled{opacity:.5}
+.row{display:flex;gap:8px;align-items:center}
+.row > .grow{flex:1;min-width:0}
+
+/* bin placard: the one bold element */
+.placard{background:var(--card);border-radius:4px;overflow:hidden;position:sticky;top:env(safe-area-inset-top,0px);z-index:5;border:1px solid var(--line)}
+.placard::before,.placard::after{content:"";display:block;height:8px;background:repeating-linear-gradient(135deg,var(--beam) 0 14px,var(--ink) 14px 28px)}
+.placard .in{display:flex;align-items:center;gap:10px;padding:8px 12px}
+.placard .code{font-family:var(--cond);font-weight:700;font-size:2.4rem;letter-spacing:.01em;line-height:1.05;white-space:nowrap;overflow:hidden}
+.placard .code.none{color:var(--muted);font-size:1.4rem;font-weight:600}
+.placard .meta{font-size:.9rem;color:var(--muted)}
+.placard .meta b{color:var(--ink);font-family:var(--cond);font-size:1.15rem}
+.placard .btn{min-height:40px;padding:0 12px}
+
+/* scan input */
+.scanbar{display:flex;gap:8px;margin-top:12px}
+.scanbar input{flex:1;min-width:0;height:52px;border-radius:10px;border:2px solid var(--line);background:var(--card);padding:0 12px;font-size:1.1rem;font-family:var(--cond);font-weight:600;letter-spacing:.02em}
+.scanbar input:focus{border-color:var(--film);outline:none}
+.iconbtn{width:52px;height:52px;border-radius:10px;border:1px solid var(--line);background:var(--card);font-size:1.3rem;display:inline-flex;align-items:center;justify-content:center}
+.iconbtn.on{background:var(--film);color:var(--film-ink);border-color:var(--film)}
+
+#reader{margin-top:10px;border-radius:10px;overflow:hidden;background:#000}
+#reader video{width:100%!important;display:block}
+
+/* result card */
+.result{margin-top:12px;border-radius:12px;padding:14px 16px;border-left:8px solid var(--line);background:var(--card)}
+.result .big{font-family:var(--cond);font-weight:700;font-size:1.7rem;line-height:1.1}
+.result .hu{font-family:var(--cond);font-size:1.25rem;font-weight:600}
+.result.match{background:var(--ok-bg);border-left-color:var(--ok)} .result.match .big{color:var(--ok)}
+.result.misplaced{background:var(--warn-bg);border-left-color:var(--warn)} .result.misplaced .big{color:var(--warn)}
+.result.unknown{background:var(--bad-bg);border-left-color:var(--bad)} .result.unknown .big{color:var(--bad)}
+.result.info{background:var(--info-bg);border-left-color:var(--film)} .result.info .big{color:var(--film)}
+.result.flash{animation:flash .35s ease-out}
+@keyframes flash{from{transform:scale(.97)}to{transform:none}}
+@media (prefers-reduced-motion:reduce){.result.flash{animation:none}}
+
+/* lists */
+.list{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item .main{flex:1;min-width:0}
+.item .t{font-family:var(--cond);font-weight:600;font-size:1.1rem}
+.item .s{font-size:.85rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{width:26px;height:26px;border-radius:50%;flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:700;border:2px solid var(--line);color:var(--muted)}
+.dot.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.dot.warn{background:var(--warn);border-color:var(--warn);color:#fff}
+.dot.bad{background:var(--bad);border-color:var(--bad);color:#fff}
+.item button.x{border:0;background:none;color:var(--muted);font-size:1.1rem;min-width:40px;min-height:40px}
+button.item{width:100%;text-align:left;background:none;border-left:0;border-right:0;border-bottom:0}
+button.item:first-child{border-top:0}
+
+/* progress */
+.bar{height:10px;border-radius:5px;background:var(--line);overflow:hidden}
+.bar > i{display:block;height:100%;background:var(--ok)}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.stat .n{font-family:var(--cond);font-weight:700;font-size:1.8rem;line-height:1}
+.stat .l{font-size:.85rem;color:var(--muted)}
+.stat.ok .n{color:var(--ok)} .stat.warn .n{color:var(--warn)} .stat.bad .n{color:var(--bad)}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+.chip{flex:none;min-height:38px;padding:0 12px;border-radius:19px;border:1px solid var(--line);background:var(--card);font-size:.9rem}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.search{width:100%;height:46px;border-radius:10px;border:1px solid var(--line);background:var(--card);padding:0 12px}
+.frac{font-family:var(--cond);font-weight:700;font-size:1.15rem;white-space:nowrap}
+
+/* tabs */
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:10;background:var(--card);border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom,0px)}
+.tabs button{flex:1;min-height:62px;border:0;background:none;font-weight:600;color:var(--muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:.85rem}
+.tabs button span{font-size:1.25rem}
+.tabs button.on{color:var(--film)}
+
+/* sheet */
+.sheet{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.45);display:flex;align-items:flex-end}
+.sheet .panel{background:var(--bg);width:100%;max-width:640px;margin:0 auto;border-radius:16px 16px 0 0;max-height:88%;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px)}
+.sheet .head{padding:14px;display:flex;gap:8px;align-items:center}
+.sheet .body{overflow:auto;padding:0 14px 14px}
+.grp{margin:14px 0 6px;font-weight:600;color:var(--muted);font-size:.9rem}
+
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(80px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:30;max-width:90%;font-size:.95rem}
+.drop{border:2px dashed var(--line);border-radius:14px;padding:22px 16px;text-align:center;background:var(--card)}
+.err{color:var(--bad);font-weight:600}
+table.kv{width:100%;border-collapse:collapse;font-size:.95rem}
+table.kv td{padding:6px 0;border-top:1px solid var(--line);vertical-align:top}
+table.kv td:first-child{white-space:nowrap;padding-right:12px;color:var(--muted)}
+table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;font-size:1.05rem;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+
+<!-- ============ SETUP (no data) ============ -->
+<section id="setup" class="wrap hidden">
+  <h1 style="font-family:var(--cond);font-size:2.2rem;margin-top:10px">Pallet Count</h1>
+  <p class="muted">Scan pallets on site and reconcile them against SCWM Physical Stock.</p>
+  <div class="drop" style="margin-top:16px">
+    <p style="font-weight:600">Step 1: import the SCWM Physical Stock export</p>
+    <p class="muted small">.xlsx file. Data stays on this phone and is never uploaded. Storage type 610 is excluded automatically.</p>
+    <label class="btn primary" style="margin-top:10px">Choose file<input id="fileIn" type="file" accept=".xlsx,.xls,.csv" hidden></label>
+    <p id="setupMsg" class="small" style="margin-top:10px"></p>
+  </div>
+  <h2>How to use</h2>
+  <ol class="muted" style="padding-left:20px;margin:0">
+    <li>Racking: scan the bin barcode, then scan each pallet label.</li>
+    <li>Machine or floor locations (101, 118, etc.): tap "Change", pick the location, then scan the pallets.</li>
+    <li>When a location is finished, tap "Location done", including empty ones. This is how the report tells a genuinely missing pallet from one that was never checked.</li>
+    <li>Go to "Report" to export the Excel file.</li>
+  </ol>
+</section>
+
+<!-- ============ SCAN ============ -->
+<section id="tab-scan" class="wrap hidden">
+  <div class="placard">
+    <div class="in">
+      <div class="grow" style="min-width:0;flex:1">
+        <div id="binCode" class="code none">No location</div>
+        <div id="binMeta" class="meta">Scan a bin barcode or tap "Change"</div>
+      </div>
+      <button class="btn" id="pickBin">Change</button>
+    </div>
+  </div>
+
+  <div class="scanbar">
+    <input id="scanIn" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="none" placeholder="Scan HU or bin" aria-label="Scan input">
+    <button class="iconbtn" id="kbBtn" title="Type manually" aria-label="Toggle keyboard">⌨️</button>
+    <button class="iconbtn" id="camBtn" title="Camera" aria-label="Toggle camera">📷</button>
+  </div>
+  <div id="reader" class="hidden"></div>
+  <p id="camMsg" class="small err hidden"></p>
+
+  <div id="result" class="result info">
+    <div class="big">Ready</div>
+    <div class="small">Scan a bin, then scan pallet labels.</div>
+  </div>
+
+  <div class="row" style="margin-top:12px">
+    <button class="btn grow" id="doneBin">✔ Location done</button>
+    <button class="btn" id="undoBtn">↶ Undo</button>
+  </div>
+
+  <h2 id="expTitle">Expected pallets here</h2>
+  <div id="expList" class="list"></div>
+
+  <h2>Recent scans</h2>
+  <div id="recentList" class="list"></div>
+</section>
+
+<!-- ============ PROGRESS ============ -->
+<section id="tab-prog" class="wrap hidden">
+  <h2 style="margin-top:4px">Overall progress</h2>
+  <div class="bar"><i id="progBar" style="width:0"></i></div>
+  <p id="progTxt" class="small muted"></p>
+  <div class="stats" style="margin-top:10px">
+    <div class="stat ok"><div class="n" id="stMatch">0</div><div class="l">✅ Matched</div></div>
+    <div class="stat warn"><div class="n" id="stMis">0</div><div class="l">🔀 Wrong location</div></div>
+    <div class="stat bad"><div class="n" id="stMiss">0</div><div class="l">❌ Missing (location done)</div></div>
+    <div class="stat bad"><div class="n" id="stUnk">0</div><div class="l">➕ Not in SAP</div></div>
+  </div>
+
+  <h2>Locations</h2>
+  <input id="binSearch" class="search" placeholder="Search location, e.g. 01-03 or 4040">
+  <div class="chips" style="margin-top:8px" id="filterChips">
+    <button class="chip on" data-f="all">All</button>
+    <button class="chip" data-f="todo">Not counted</button>
+    <button class="chip" data-f="issue">Discrepancies</button>
+    <button class="chip" data-f="done">Done</button>
+  </div>
+  <div class="chips" style="margin-top:6px" id="typeChips"></div>
+  <div id="binList" class="list" style="margin-top:8px"></div>
+  <button id="moreBins" class="btn block hidden" style="margin-top:8px">Show more</button>
+</section>
+
+<!-- ============ REPORT ============ -->
+<section id="tab-rep" class="wrap hidden">
+  <h2 style="margin-top:4px">Export</h2>
+  <p class="small muted">The Excel file includes: Summary, Matched, Wrong location, Missing, Not in SAP, Stock without HU, and the scan log.</p>
+  <button id="exportXlsx" class="btn primary block">Export Excel report</button>
+
+  <h2>Counter name</h2>
+  <input id="byName" class="search" placeholder="Your name (saved with every scan)">
+
+  <h2>Backup and merge</h2>
+  <p class="small muted">iPhones can clear website data, so back up after each area. If several people count different areas, merge their backups onto one phone before exporting.</p>
+  <div class="row">
+    <button id="backupBtn" class="btn grow">Back up scans</button>
+    <label class="btn grow">Merge backup<input id="mergeIn" type="file" accept=".json,application/json" hidden></label>
+  </div>
+
+  <h2>SAP data</h2>
+  <table class="kv" id="sapInfo"></table>
+  <div class="row" style="margin-top:12px">
+    <label class="btn grow">Replace SAP export<input id="fileIn2" type="file" accept=".xlsx,.xls,.csv" hidden></label>
+    <button id="resetBtn" class="btn danger grow">Clear all scans</button>
+  </div>
+  <p class="small muted" style="margin-top:8px">Replacing the SAP export keeps your scans and re-checks them against the new data.</p>
+</section>
+
+<nav class="tabs hidden" id="tabs">
+  <button data-tab="scan" class="on"><span>▦</span>Scan</button>
+  <button data-tab="prog"><span>◔</span>Progress</button>
+  <button data-tab="rep"><span>⇩</span>Report</button>
+</nav>
+
+<!-- bin picker -->
+<div id="binSheet" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Choose location">
+  <div class="panel">
+    <div class="head">
+      <input id="pickSearch" class="search" placeholder="Search locations (all storage types)">
+      <button class="btn" id="closePick">Close</button>
+    </div>
+    <div class="body" id="pickBody"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+/* HU count core logic — pure functions, no DOM */
+(function (root) {
+  const EXCLUDED_TYPES = ['610'];
+
+  function normHU(v) {
+    if (v === null || v === undefined) return '';
+    let s = String(v).trim().toUpperCase().replace(/\s+/g, '');
+    if (/^\d+(\.0+)?$/.test(s)) s = s.replace(/\.0+$/, '');
+    s = s.replace(/^0+/, '');
+    return s;
+  }
+  function binKey(v) {
+    return String(v || '').toUpperCase().replace(/[\s\-_.\/]/g, '');
+  }
+  function clean(v) {
+    if (v === null || v === undefined) return '';
+    return String(v).trim();
+  }
+
+  const COLS = {
+    type: ['Storage Type', 'Lagertyp'],
+    bin: ['Storage Bin', 'Lagerplatz'],
+    hu: ['Handling Unit', 'HU'],
+    top: ['Highest-Level HU', 'Oberste HU'],
+    product: ['Product', 'Produkt'],
+    desc: ['Product Description', 'Product Short Description', 'Produktbeschreibung'],
+    qty: ['Quantity', 'Menge'],
+    uom: ['Base Unit of Measure', 'Basismengeneinheit'],
+    batch: ['Batch', 'Charge'],
+    stock: ['Descr. of Stock Type', 'Stock Type'],
+    grdate: ['Goods Receipt Date']
+  };
+
+  function findCol(headers, names) {
+    const hs = headers.map(h => clean(h).toLowerCase());
+    for (const n of names) {
+      const i = hs.indexOf(n.toLowerCase());
+      if (i >= 0) return headers[i];
+    }
+    return null;
+  }
+
+  function fmtDate(v) {
+    if (v === null || v === undefined || v === '') return '';
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    if (typeof v === 'number') { // Excel serial
+      const d = new Date(Math.round((v - 25569) * 86400000));
+      return d.toISOString().slice(0, 10);
+    }
+    return String(v).slice(0, 10);
+  }
+
+  /* rows: array of objects keyed by header */
+  function buildSap(rows, fileName) {
+    if (!rows.length) throw new Error('The file has no data rows.');
+    const headers = Object.keys(rows[0]);
+    const c = {};
+    for (const k in COLS) c[k] = findCol(headers, COLS[k]);
+    const missing = ['type', 'bin', 'hu', 'top'].filter(k => !c[k]);
+    if (missing.length) {
+      throw new Error('Required columns not found: ' + missing.map(k => COLS[k][0]).join(', ') + '. Use the original SCWM Physical Stock export.');
+    }
+    const pallets = {};   // palletHU -> info
+    const huMap = {};     // any HU -> palletHU
+    const bins = {};      // bin -> {type, pallets:[]}
+    const excluded = {};  // HU -> {pallet, bin, type}
+    const noHU = [];
+    let rowCount = 0, excludedRows = 0;
+
+    for (const r of rows) {
+      const type = clean(r[c.type]);
+      const bin = clean(r[c.bin]);
+      const hu = normHU(r[c.hu]);
+      if (!bin && !hu) continue; // totals / blank rows
+      rowCount++;
+      let top = normHU(r[c.top]);
+      if (!top) top = hu;
+      const qty = Number(r[c.qty]) || 0;
+      const product = c.product ? clean(r[c.product]) : '';
+      const desc = c.desc ? clean(r[c.desc]) : '';
+      const uom = c.uom ? clean(r[c.uom]) : '';
+      const batch = c.batch ? clean(r[c.batch]) : '';
+      const stock = c.stock ? clean(r[c.stock]) : '';
+      const gr = c.grdate ? fmtDate(r[c.grdate]) : '';
+
+      if (EXCLUDED_TYPES.includes(type)) {
+        excludedRows++;
+        if (hu) excluded[hu] = { pallet: top, bin, type };
+        if (top) excluded[top] = { pallet: top, bin, type };
+        continue;
+      }
+      if (!top) {
+        noHU.push({ type, bin, product, desc, qty, uom, batch, stock });
+        continue;
+      }
+      let p = pallets[top];
+      if (!p) {
+        p = pallets[top] = { hu: top, type, bin, products: [], descs: [], batches: [], stocks: [], qty: 0, uom, inner: [], gr };
+        if (!bins[bin]) bins[bin] = { bin, type, pallets: [] };
+        bins[bin].pallets.push(top);
+      }
+      p.qty = Math.round((p.qty + qty) * 1000) / 1000;
+      if (product && !p.products.includes(product)) p.products.push(product);
+      if (desc && !p.descs.includes(desc)) p.descs.push(desc);
+      if (batch && !p.batches.includes(batch)) p.batches.push(batch);
+      if (stock && !p.stocks.includes(stock)) p.stocks.push(stock);
+      if (hu && hu !== top) p.inner.push(hu);
+      huMap[top] = top;
+      if (hu) huMap[hu] = top;
+    }
+    // bins with no HU stock still count as bins
+    for (const n of noHU) if (!bins[n.bin]) bins[n.bin] = { bin: n.bin, type: n.type, pallets: [] };
+
+    const binIndex = {};
+    for (const b in bins) binIndex[binKey(b)] = b;
+
+    return {
+      fileName: fileName || '',
+      importedAt: new Date().toISOString(),
+      rowCount, excludedRows,
+      pallets, huMap, bins, binIndex, excluded, noHU
+    };
+  }
+
+  /* Resolve a scanned rack-bin barcode to a bin name */
+  function resolveBin(sap, raw) {
+    const k = binKey(raw);
+    if (!k) return null;
+    if (sap.binIndex[k]) return sap.binIndex[k];
+    if (sap.binIndex['500' + k]) return sap.binIndex['500' + k];
+    return null;
+  }
+  /* Rack bin that is not in SAP list (empty in SAP) but looks like a rack location */
+  function looksLikeRackBin(raw) {
+    const s = String(raw || '').trim().toUpperCase();
+    return /^(500\s*)?\d{2}-\d{2}-\d+-\d+$/.test(s);
+  }
+  function rackBinName(raw) {
+    const s = String(raw || '').trim().toUpperCase().replace(/^500\s*/, '');
+    return '500 ' + s;
+  }
+
+  /* Classify one HU scan at a bin */
+  function classify(sap, rawHU, bin) {
+    const hu = normHU(rawHU);
+    const res = { hu, pallet: hu, bin, expectedBin: '', status: 'unknown', inner: false, note: '' };
+    const pallet = sap.huMap[hu];
+    if (pallet) {
+      res.pallet = pallet;
+      res.inner = pallet !== hu;
+      const p = sap.pallets[pallet];
+      res.expectedBin = p.bin;
+      res.status = p.bin === bin ? 'match' : 'misplaced';
+      if (res.inner) res.note = 'Inner HU scanned, matched to pallet ' + pallet;
+      return res;
+    }
+    const ex = sap.excluded[hu];
+    if (ex) {
+      res.pallet = ex.pallet;
+      res.inner = ex.pallet !== hu;
+      res.expectedBin = ex.bin;
+      res.status = 'misplaced';
+      res.note = 'SAP has it in storage type ' + ex.type + ' (excluded)';
+      return res;
+    }
+    res.status = 'unknown';
+    return res;
+  }
+
+  /* Build report tables from sap + scans + counted bins */
+  function buildReport(sap, scans, countedBins) {
+    const counted = new Set(countedBins || []);
+    for (const s of scans) counted.add(s.bin);
+    const foundPallets = new Map();
+    for (const s of scans) if (s.status !== 'unknown') foundPallets.set(s.pallet, s);
+
+    const matched = [], misplaced = [], missing = [], unknown = [];
+    for (const s of scans) {
+      const p = sap.pallets[s.pallet];
+      if (s.status === 'match') matched.push({ s, p });
+      else if (s.status === 'misplaced') misplaced.push({ s, p });
+      else unknown.push({ s });
+    }
+    for (const hu in sap.pallets) {
+      if (foundPallets.has(hu)) continue;
+      const p = sap.pallets[hu];
+      missing.push({ p, binCounted: counted.has(p.bin) });
+    }
+    const total = Object.keys(sap.pallets).length;
+    return { matched, misplaced, missing, unknown, total, counted };
+  }
+
+  function binProgress(sap, scans, countedBins) {
+    const found = new Set(scans.filter(s => s.status !== 'unknown').map(s => s.pallet));
+    const scannedIn = {};
+    for (const s of scans) (scannedIn[s.bin] = scannedIn[s.bin] || []).push(s);
+    const counted = new Set(countedBins || []);
+    const out = [];
+    for (const b in sap.bins) {
+      const info = sap.bins[b];
+      const exp = info.pallets.length;
+      const got = info.pallets.filter(h => found.has(h)).length;
+      const here = scannedIn[b] || [];
+      out.push({ bin: b, type: info.type, expected: exp, found: got, scannedHere: here.length, counted: counted.has(b) || here.length > 0 });
+    }
+    return out;
+  }
+
+  const api = { normHU, binKey, buildSap, resolveBin, looksLikeRackBin, rackBinName, classify, buildReport, binProgress, EXCLUDED_TYPES };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.HUCore = api;
+})(this);
+
+</script>
+<script>
+(function(){
+'use strict';
+const C = window.HUCore;
+const LS_SAP='hucount.sap.v1', LS_STATE='hucount.state.v1';
+let SAP=null;
+let ST={scans:[],counted:[],currentBin:'',extraBins:[],by:''};
+let downloads=null;
+if (window.claude && window.claude.use) {
+  window.claude.use('downloads').then(d=>{downloads=d;}).catch(()=>{});
+}
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- storage ---------- */
+function saveState(){try{localStorage.setItem(LS_STATE,JSON.stringify(ST));}catch(e){toast('Save failed: export or back up now');}}
+function saveSap(){try{localStorage.setItem(LS_SAP,JSON.stringify(SAP));}catch(e){toast('SAP data too large to keep; re-import after reopening');}}
+function load(){
+  try{const s=localStorage.getItem(LS_SAP); if(s) SAP=JSON.parse(s);}catch(e){SAP=null;}
+  try{const s=localStorage.getItem(LS_STATE); if(s) ST=Object.assign(ST,JSON.parse(s));}catch(e){}
+}
+
+/* ---------- sound ---------- */
+let actx=null;
+function ensureAudio(){ if(!actx){ try{actx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(actx&&actx.state==='suspended') actx.resume(); }
+function tone(seq){
+  if(!actx) return; let t=actx.currentTime;
+  for(const [f,d] of seq){const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=f;o.type='square';g.gain.setValueAtTime(.08,t);g.gain.exponentialRampToValueAtTime(.0001,t+d);o.connect(g).connect(actx.destination);o.start(t);o.stop(t+d);t+=d+.03;}
+}
+const SND={match:[[1320,.09]],misplaced:[[880,.1],[660,.12]],unknown:[[220,.35]],dup:[[520,.08],[520,.08]],bin:[[1000,.05],[1400,.07]]};
+
+/* ---------- toast ---------- */
+let tt=null;
+function toast(m){const t=$('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(tt);tt=setTimeout(()=>t.classList.add('hidden'),2600);}
+
+/* ---------- import ---------- */
+function readFile(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>{try{
+      const wb=XLSX.read(new Uint8Array(r.result),{type:'array',cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      res(XLSX.utils.sheet_to_json(ws,{defval:''}));
+    }catch(e){rej(e);}};
+    r.onerror=()=>rej(new Error('Could not read the file'));
+    r.readAsArrayBuffer(file);
+  });
+}
+async function importFile(file,msgEl){
+  if(!file) return;
+  if(typeof XLSX==='undefined'){ if(msgEl) msgEl.innerHTML='<span class="err">The Excel reader did not load. Check your connection and reopen the page.</span>'; return; }
+  if(msgEl) msgEl.textContent='Reading…';
+  try{
+    const rows=await readFile(file);
+    SAP=C.buildSap(rows,file.name);
+    saveSap();
+    // re-classify existing scans against new data
+    ST.scans=ST.scans.map(s=>Object.assign(C.classify(SAP,s.raw||s.hu,s.bin),{raw:s.raw||s.hu,time:s.time,by:s.by}));
+    saveState();
+    if(msgEl) msgEl.textContent='';
+    toast('Imported '+Object.keys(SAP.pallets).length+' pallets');
+    showApp();
+  }catch(e){ if(msgEl) msgEl.innerHTML='<span class="err">'+esc(e.message||e)+'</span>'; else toast(e.message||String(e)); }
+}
+$('fileIn').addEventListener('change',e=>importFile(e.target.files[0],$('setupMsg')));
+$('fileIn2').addEventListener('change',e=>{importFile(e.target.files[0],null);e.target.value='';});
+
+/* ---------- bins ---------- */
+function binInfo(b){
+  if(SAP.bins[b]) return SAP.bins[b];
+  return {bin:b,type:(b.split(' ')[0]||''),pallets:[]};
+}
+function setBin(b,announce){
+  ST.currentBin=b;
+  if(!SAP.bins[b] && !ST.extraBins.includes(b)) ST.extraBins.push(b);
+  saveState(); renderScan();
+  if(announce){ tone(SND.bin); showResult('info',b,'Location set. '+binInfo(b).pallets.length+' pallet(s) expected here in SAP'); }
+}
+
+/* ---------- scanning ---------- */
+function palletLine(p){ if(!p) return ''; return [p.products[0]||'', p.descs[0]||'', p.qty?(p.qty+' '+p.uom):''].filter(Boolean).join('  '); }
+function showResult(cls,big,sub,hu){
+  const r=$('result'); r.className='result '+cls;
+  r.innerHTML=(hu?'<div class="hu">'+esc(hu)+'</div>':'')+'<div class="big">'+esc(big)+'</div>'+(sub?'<div class="small">'+esc(sub)+'</div>':'');
+  void r.offsetWidth; r.classList.add('flash');
+}
+function handleCode(raw){
+  raw=String(raw||'').trim(); if(!raw||!SAP) return;
+  ensureAudio();
+  const n=C.normHU(raw);
+  const isHU = !!(SAP.huMap[n]||SAP.excluded[n]);
+  if(!isHU){
+    const b=C.resolveBin(SAP,raw);
+    if(b){ setBin(b,true); return; }
+    if(C.looksLikeRackBin(raw)){ const nb=C.rackBinName(raw); setBin(nb,true); showResult('info',nb,'Location set. This location is empty in SAP'); return; }
+    if(/[\s-]/.test(raw)){ tone(SND.unknown); showResult('unknown','Code not recognised',raw); return; }
+  }
+  if(!ST.currentBin){ tone(SND.unknown); showResult('unknown','Scan or choose a location first','Not recorded: '+raw); return; }
+  const res=C.classify(SAP,raw,ST.currentBin);
+  const dup=ST.scans.find(s=>s.pallet===res.pallet);
+  if(dup){ tone(SND.dup); showResult('info','Already scanned','At '+dup.bin+' ('+dup.time.slice(11,16)+')',res.pallet); return; }
+  const rec=Object.assign(res,{raw,time:localIso(),by:ST.by||''});
+  ST.scans.push(rec); saveState();
+  const p=SAP.pallets[res.pallet];
+  if(res.status==='match'){ tone(SND.match); showResult('match','✅ Correct location',(res.inner?res.note+'  ':'')+palletLine(p),res.pallet); }
+  else if(res.status==='misplaced'){ tone(SND.misplaced); showResult('misplaced','🔀 Should be at '+res.expectedBin,(res.note?res.note+'  ':'')+palletLine(p),res.pallet); }
+  else { tone(SND.unknown); showResult('unknown','➕ Not in SAP','Recorded at '+ST.currentBin,res.hu); }
+  renderScan();
+}
+function localIso(){const d=new Date(),z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+' '+z(d.getHours())+':'+z(d.getMinutes())+':'+z(d.getSeconds());}
+
+const scanIn=$('scanIn');
+scanIn.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const v=scanIn.value; scanIn.value=''; handleCode(v);} });
+$('kbBtn').addEventListener('click',()=>{
+  const on=scanIn.getAttribute('inputmode')==='none';
+  scanIn.setAttribute('inputmode',on?'text':'none');
+  $('kbBtn').classList.toggle('on',on);
+  scanIn.blur(); setTimeout(()=>scanIn.focus(),50);
+});
+
+/* camera */
+let qr=null, camOn=false, lastCode='', lastAt=0;
+async function startCam(){
+  $('camMsg').classList.add('hidden');
+  if(typeof Html5Qrcode==='undefined'){ camErr('The scanner did not load. Check your connection.'); return; }
+  $('reader').classList.remove('hidden');
+  try{
+    const F=Html5QrcodeSupportedFormats;
+    qr=new Html5Qrcode('reader',{verbose:false,formatsToSupport:[F.CODE_128,F.CODE_39,F.EAN_13,F.ITF,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true}});
+    await qr.start({facingMode:'environment'},{fps:12,qrbox:(w,h)=>({width:Math.floor(w*.92),height:Math.max(80,Math.floor(h*.42))}),aspectRatio:1.6},
+      txt=>{const now=Date.now(); if(txt===lastCode&&now-lastAt<2500) return; lastCode=txt; lastAt=now; handleCode(txt);}, ()=>{});
+    camOn=true; $('camBtn').classList.add('on');
+  }catch(e){
+    $('reader').classList.add('hidden'); qr=null;
+    camErr('Camera could not start. Open this link directly in Safari and allow camera access, or use manual entry or a Bluetooth scanner.');
+  }
+}
+function camErr(m){const el=$('camMsg');el.textContent=m;el.classList.remove('hidden');}
+async function stopCam(){ if(qr){ try{await qr.stop(); qr.clear();}catch(e){} } qr=null; camOn=false; $('reader').classList.add('hidden'); $('camBtn').classList.remove('on'); }
+$('camBtn').addEventListener('click',()=>{ ensureAudio(); camOn?stopCam():startCam(); });
+
+$('undoBtn').addEventListener('click',()=>{
+  const s=ST.scans.pop(); if(!s){toast('Nothing to undo');return;}
+  saveState(); renderScan(); toast('Removed '+s.pallet);
+});
+$('doneBin').addEventListener('click',()=>{
+  const b=ST.currentBin; if(!b){toast('No location selected');return;}
+  const i=ST.counted.indexOf(b);
+  if(i>=0){ST.counted.splice(i,1);toast('Location reopened');}
+  else{ST.counted.push(b);toast(b+' marked as done');}
+  saveState(); renderScan();
+});
+
+/* ---------- render: scan tab ---------- */
+function statusDot(st){return st==='match'?'<span class="dot ok">✓</span>':st==='misplaced'?'<span class="dot warn">⇄</span>':'<span class="dot bad">+</span>';}
+function fitCode(){const el=$('binCode');let s=38;el.style.fontSize=s+'px';while(el.scrollWidth>el.clientWidth&&s>18){s-=2;el.style.fontSize=s+'px';}}
+window.addEventListener('resize',()=>{if(ST.currentBin)fitCode();});
+function renderScan(){
+  const b=ST.currentBin;
+  const code=$('binCode'), meta=$('binMeta');
+  if(!b){ code.textContent='No location'; code.className='code none'; code.style.fontSize=''; meta.textContent='Scan a bin barcode or tap "Change"'; $('expList').innerHTML='<div class="item muted">No location selected</div>'; $('doneBin').textContent='✔ Location done'; }
+  else{
+    const info=binInfo(b);
+    const found=new Set(ST.scans.filter(s=>s.status!=='unknown').map(s=>s.pallet));
+    const got=info.pallets.filter(h=>found.has(h)).length;
+    const here=ST.scans.filter(s=>s.bin===b).length;
+    code.textContent=b; code.className='code'; fitCode();
+    const done=ST.counted.includes(b);
+    meta.innerHTML='Expected <b>'+info.pallets.length+'</b>  Found <b>'+got+'</b>  Here <b>'+here+'</b>'+(done?'  ✔ Done':'');
+    $('doneBin').textContent=done?'Reopen location':'✔ Location done';
+    if(!info.pallets.length){ $('expList').innerHTML='<div class="item muted">No pallets expected here in SAP</div>'; }
+    else{
+      $('expList').innerHTML=info.pallets.map(h=>{
+        const p=SAP.pallets[h]; const f=ST.scans.find(s=>s.pallet===h);
+        const dot=f?(f.bin===b?'<span class="dot ok">✓</span>':'<span class="dot warn">⇄</span>'):'<span class="dot"></span>';
+        const sub=f&&f.bin!==b?('Found at '+f.bin):palletLine(p);
+        return '<div class="item">'+dot+'<div class="main"><div class="t">'+esc(h)+'</div><div class="s">'+esc(sub)+'</div></div></div>';
+      }).join('');
+    }
+  }
+  const rec=ST.scans.slice(-8).reverse();
+  $('recentList').innerHTML=rec.length?rec.map(s=>{
+    const idx=ST.scans.indexOf(s);
+    const sub=s.status==='match'?s.bin:s.status==='misplaced'?('At '+s.bin+', should be '+s.expectedBin):('At '+s.bin+', not in SAP');
+    return '<div class="item">'+statusDot(s.status)+'<div class="main"><div class="t">'+esc(s.pallet)+'</div><div class="s">'+esc(s.time.slice(11,16)+'  '+sub)+'</div></div><button class="x" data-del="'+idx+'" aria-label="Delete">✕</button></div>';
+  }).join(''):'<div class="item muted">No scans yet</div>';
+}
+$('recentList').addEventListener('click',e=>{
+  const i=e.target.getAttribute('data-del'); if(i===null) return;
+  const s=ST.scans[+i]; if(!s) return;
+  if(!confirm('Delete the scan of '+s.pallet+'?')) return;
+  ST.scans.splice(+i,1); saveState(); renderScan();
+});
+
+/* ---------- bin picker ---------- */
+function openPicker(){ $('binSheet').classList.remove('hidden'); $('pickSearch').value=''; renderPicker(); }
+function renderPicker(){
+  const q=C.binKey($('pickSearch').value);
+  const all=Object.keys(SAP.bins).concat(ST.extraBins.filter(b=>!SAP.bins[b]));
+  let html='';
+  if(q){
+    const hits=all.filter(b=>C.binKey(b).includes(q)).sort().slice(0,80);
+    html=hits.length?'<div class="list">'+hits.map(pickItem).join('')+'</div>':'<p class="muted">No matching location</p>';
+  }else{
+    const groups={};
+    for(const b of all){const t=binInfo(b).type; if(t==='500') continue; (groups[t]=groups[t]||[]).push(b);}
+    for(const t of Object.keys(groups).sort()){
+      html+='<div class="grp">Storage type '+esc(t)+'</div><div class="list">'+groups[t].sort().map(pickItem).join('')+'</div>';
+    }
+    html+='<p class="small muted" style="margin-top:12px">For racking (500), scan the bin barcode or search above.</p>';
+  }
+  $('pickBody').innerHTML=html;
+}
+function pickItem(b){
+  const n=binInfo(b).pallets.length;
+  return '<button class="item" data-bin="'+esc(b)+'"><div class="main"><div class="t">'+esc(b)+'</div></div><span class="frac">'+n+'</span></button>';
+}
+$('pickBin').addEventListener('click',openPicker);
+$('closePick').addEventListener('click',()=>$('binSheet').classList.add('hidden'));
+$('binSheet').addEventListener('click',e=>{ if(e.target.id==='binSheet') $('binSheet').classList.add('hidden'); });
+$('pickSearch').addEventListener('input',renderPicker);
+$('pickBody').addEventListener('click',e=>{
+  const it=e.target.closest('[data-bin]'); if(!it) return;
+  $('binSheet').classList.add('hidden'); ensureAudio(); setBin(it.getAttribute('data-bin'),true); showTab('scan');
+});
+
+/* ---------- progress tab ---------- */
+let pf='all', ptype='', pLimit=150;
+function renderProg(){
+  const rep=C.buildReport(SAP,ST.scans,ST.counted);
+  const found=rep.matched.length+rep.misplaced.filter(x=>x.p).length;
+  const pct=rep.total?Math.round(found/rep.total*100):0;
+  $('progBar').style.width=pct+'%';
+  $('progTxt').textContent='Found '+found+' of '+rep.total+' pallets ('+pct+'%)';
+  $('stMatch').textContent=rep.matched.length;
+  $('stMis').textContent=rep.misplaced.length;
+  $('stMiss').textContent=rep.missing.filter(m=>m.binCounted).length;
+  $('stUnk').textContent=rep.unknown.length;
+
+  let rows=C.binProgress(SAP,ST.scans,ST.counted);
+  for(const b of ST.extraBins) if(!SAP.bins[b]){ const here=ST.scans.filter(s=>s.bin===b).length; rows.push({bin:b,type:binInfo(b).type,expected:0,found:0,scannedHere:here,counted:ST.counted.includes(b)||here>0}); }
+  const types=[...new Set(rows.map(r=>r.type))].sort();
+  $('typeChips').innerHTML='<button class="chip'+(ptype===''?' on':'')+'" data-t="">All types</button>'+types.map(t=>'<button class="chip'+(ptype===t?' on':'')+'" data-t="'+esc(t)+'">'+esc(t)+'</button>').join('');
+  const q=C.binKey($('binSearch').value);
+  const issue=r=>r.counted&&(r.found<r.expected||r.scannedHere>r.found);
+  rows=rows.filter(r=>(!ptype||r.type===ptype)&&(!q||C.binKey(r.bin).includes(q))&&(pf==='all'||(pf==='todo'&&!r.counted)||(pf==='done'&&r.counted)||(pf==='issue'&&issue(r))));
+  rows.sort((a,b)=>a.bin.localeCompare(b.bin,undefined,{numeric:true}));
+  const shown=rows.slice(0,pLimit);
+  $('binList').innerHTML=shown.length?shown.map(r=>{
+    const cls=!r.counted?'':issue(r)?'bad':'ok';
+    const mark=!r.counted?'':cls==='ok'?'✓':'!';
+    const extra=r.scannedHere>r.found?('  '+(r.scannedHere-r.found)+' extra'):'';
+    return '<button class="item" data-bin="'+esc(r.bin)+'"><span class="dot '+cls+'">'+mark+'</span><div class="main"><div class="t">'+esc(r.bin)+'</div><div class="s">'+(r.counted?'Counted':'Not counted')+esc(extra)+'</div></div><span class="frac">'+r.found+' / '+r.expected+'</span></button>';
+  }).join(''):'<div class="item muted">No matching locations</div>';
+  $('moreBins').classList.toggle('hidden',rows.length<=pLimit);
+}
+$('filterChips').addEventListener('click',e=>{const f=e.target.getAttribute('data-f'); if(!f) return; pf=f; pLimit=150; document.querySelectorAll('#filterChips .chip').forEach(c=>c.classList.toggle('on',c.getAttribute('data-f')===f)); renderProg();});
+$('typeChips').addEventListener('click',e=>{const t=e.target.getAttribute('data-t'); if(t===null) return; ptype=t; pLimit=150; renderProg();});
+$('binSearch').addEventListener('input',()=>{pLimit=150;renderProg();});
+$('moreBins').addEventListener('click',()=>{pLimit+=300;renderProg();});
+$('binList').addEventListener('click',e=>{const it=e.target.closest('[data-bin]'); if(!it) return; setBin(it.getAttribute('data-bin'),false); showTab('scan');});
+
+/* ---------- report tab ---------- */
+function renderRep(){
+  $('byName').value=ST.by||'';
+  const ex=SAP.excludedRows;
+  $('sapInfo').innerHTML=[
+    ['File',SAP.fileName],['Imported',SAP.importedAt.slice(0,16).replace('T',' ')],
+    ['SAP rows',SAP.rowCount],['Excluded rows (610)',ex],['Pallets to count',Object.keys(SAP.pallets).length],
+    ['Locations',Object.keys(SAP.bins).length],['Stock rows without HU',SAP.noHU.length],['Scans recorded',ST.scans.length]
+  ].map(r=>'<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td></tr>').join('');
+}
+$('byName').addEventListener('change',e=>{ST.by=e.target.value.trim();saveState();toast('Saved');});
+
+async function saveFile(name,data){
+  if(downloads){
+    try{ await downloads.save({filename:name,data}); toast('Exported '+name); }
+    catch(e){ if(e&&e.code==='declined') return; toast('Export failed: '+(e&&e.message||'please try again')); }
+    return;
+  }
+  const blob=data instanceof Blob?data:new Blob([data]);
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);
+}
+function stamp(){return localIso().replace(/[-:]/g,'').replace(' ','_').slice(0,13);}
+
+function pCols(p){ return p?{'Product':p.products.join(', '),'Description':p.descs.join(' | '),'Quantity':p.qty,'UoM':p.uom,'Batch':p.batches.join(', '),'Stock Type':p.stocks.join(', '),'GR Date':p.gr,'Inner HU count':p.inner.length}:{}; }
+function buildWorkbook(){
+  const rep=C.buildReport(SAP,ST.scans,ST.counted);
+  const missCounted=rep.missing.filter(m=>m.binCounted), missTodo=rep.missing.filter(m=>!m.binCounted);
+  const summary=[
+    ['Pallet count report',''],['SAP file',SAP.fileName],['SAP imported',SAP.importedAt.slice(0,16).replace('T',' ')],['Report created',localIso()],
+    ['',''],['SAP pallets (excl. 610)',rep.total],['Matched',rep.matched.length],['Wrong location',rep.misplaced.length],
+    ['Missing (location counted)',missCounted.length],['Not yet counted (location not done)',missTodo.length],['Not in SAP',rep.unknown.length],
+    ['Stock rows without HU (check manually)',SAP.noHU.length],['',''],
+    ['Locations counted',rep.counted.size],['Total locations',Object.keys(SAP.bins).length],['',''],
+    ['Note','Missing does not mean the pallet does not exist. First rule out wrong locations and goods issues not yet posted, then post differences through Physical Inventory.']
+  ];
+  const matched=rep.matched.map(({s,p})=>Object.assign({'Pallet HU':s.pallet,'Storage Type':p.type,'Storage Bin':p.bin},pCols(p),{'Scanned HU':s.hu,'Scanned At':s.time,'By':s.by||''}));
+  const misplaced=rep.misplaced.map(({s,p})=>Object.assign({'Pallet HU':s.pallet,'SAP Bin':s.expectedBin,'Found Bin':s.bin,'Suggested Action':p?'Bin transfer':'Check 610 / external stock'},pCols(p),{'Scanned HU':s.hu,'Scanned At':s.time,'By':s.by||'','Note':s.note||''}));
+  const sortMiss=(a,b)=>(b.binCounted-a.binCounted)||a.p.bin.localeCompare(b.p.bin,undefined,{numeric:true});
+  const missing=rep.missing.slice().sort(sortMiss).map(({p,binCounted})=>Object.assign({'Pallet HU':p.hu,'Storage Type':p.type,'Storage Bin':p.bin,'Status':binCounted?'Not found – bin counted':'Bin not counted yet'},pCols(p),{'Inner HUs':p.inner.join(', ')}));
+  const unknown=rep.unknown.map(({s})=>({'Scanned HU':s.hu,'Raw Barcode':s.raw||'','Found Bin':s.bin,'Scanned At':s.time,'By':s.by||''}));
+  const nohu=SAP.noHU.map(n=>({'Storage Type':n.type,'Storage Bin':n.bin,'Product':n.product,'Description':n.desc,'Quantity':n.qty,'UoM':n.uom,'Batch':n.batch,'Stock Type':n.stock}));
+  const log=ST.scans.map(s=>({'Scanned At':s.time,'By':s.by||'','Bin':s.bin,'Raw Barcode':s.raw||'','HU':s.hu,'Pallet HU':s.pallet,'Status':s.status,'SAP Bin':s.expectedBin||'','Note':s.note||''}));
+
+  const wb=XLSX.utils.book_new();
+  const add=(name,rows,head)=>{const ws=rows.length?XLSX.utils.json_to_sheet(rows):XLSX.utils.aoa_to_sheet([head||['(no data)']]); autoW(ws); XLSX.utils.book_append_sheet(wb,ws,name);};
+  const sws=XLSX.utils.aoa_to_sheet(summary); sws['!cols']=[{wch:34},{wch:60}]; XLSX.utils.book_append_sheet(wb,sws,'Summary');
+  add('Matched',matched); add('Wrong location',misplaced); add('Missing',missing);
+  add('Not in SAP',unknown); add('No HU',nohu); add('Scan log',log);
+  return XLSX.write(wb,{bookType:'xlsx',type:'array'});
+}
+function autoW(ws){
+  const ref=ws['!ref']; if(!ref) return; const r=XLSX.utils.decode_range(ref); const w=[];
+  for(let c=r.s.c;c<=r.e.c;c++){let m=8;for(let R=r.s.r;R<=Math.min(r.e.r,200);R++){const cell=ws[XLSX.utils.encode_cell({r:R,c})];if(cell&&cell.v!=null)m=Math.max(m,Math.min(50,String(cell.v).length+2));}w.push({wch:m});}
+  ws['!cols']=w;
+}
+$('exportXlsx').addEventListener('click',async()=>{
+  try{ const buf=buildWorkbook(); await saveFile('Pallet_Count_'+stamp()+'.xlsx',new Blob([buf])); }
+  catch(e){ toast('Export failed: '+(e.message||e)); }
+});
+$('backupBtn').addEventListener('click',()=>{
+  const data=JSON.stringify({kind:'hucount-backup',v:1,at:localIso(),by:ST.by,scans:ST.scans,counted:ST.counted,extraBins:ST.extraBins});
+  saveFile('Pallet_Count_Backup_'+stamp()+'.json',data);
+});
+$('mergeIn').addEventListener('change',e=>{
+  const f=e.target.files[0]; e.target.value=''; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const d=JSON.parse(r.result); if(d.kind!=='hucount-backup') throw new Error('This is not a pallet count backup file');
+      const have=new Set(ST.scans.map(s=>s.pallet)); let add=0,skip=0;
+      for(const s of d.scans||[]){
+        const res=Object.assign(C.classify(SAP,s.raw||s.hu,s.bin),{raw:s.raw||s.hu,time:s.time,by:s.by||d.by||''});
+        if(have.has(res.pallet)){skip++;continue;} ST.scans.push(res); have.add(res.pallet); add++;
+      }
+      for(const b of d.counted||[]) if(!ST.counted.includes(b)) ST.counted.push(b);
+      for(const b of d.extraBins||[]) if(!ST.extraBins.includes(b)) ST.extraBins.push(b);
+      saveState(); renderAll(); toast('Merged '+add+' scans, skipped '+skip+' duplicates');
+    }catch(err){ toast('Merge failed: '+(err.message||err)); }
+  };
+  r.readAsText(f);
+});
+$('resetBtn').addEventListener('click',()=>{
+  if(!confirm('Clear all scans and done marks? Export or back up first.')) return;
+  ST.scans=[];ST.counted=[];ST.extraBins=[];ST.currentBin=''; saveState(); renderAll(); toast('Cleared');
+});
+
+/* ---------- tabs ---------- */
+function showTab(t){
+  for(const x of ['scan','prog','rep']) $('tab-'+x).classList.toggle('hidden',x!==t);
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.getAttribute('data-tab')===t));
+  if(t!=='scan' && camOn) stopCam();
+  if(t==='scan') renderScan(); else if(t==='prog') renderProg(); else renderRep();
+  window.scrollTo(0,0);
+}
+$('tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]'); if(b) showTab(b.getAttribute('data-tab'));});
+function renderAll(){renderScan(); if(!$('tab-prog').classList.contains('hidden')) renderProg(); if(!$('tab-rep').classList.contains('hidden')) renderRep();}
+function showApp(){ $('setup').classList.add('hidden'); $('tabs').classList.remove('hidden'); showTab('scan'); }
+
+load();
+if(SAP&&SAP.pallets) showApp(); else $('setup').classList.remove('hidden');
+})();
+</script>
+</body>
+</html>
