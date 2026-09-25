@@ -141,6 +141,24 @@ table.kv{width:100%;border-collapse:collapse;font-size:.95rem}
 table.kv td{padding:6px 0;border-top:1px solid var(--line);vertical-align:top}
 table.kv td:first-child{white-space:nowrap;padding-right:12px;color:var(--muted)}
 table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;font-size:1.05rem;overflow-wrap:anywhere}
+#reader{max-height:46vh}
+#reader video{object-fit:cover}
+.actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.actions .btn{flex:1 1 auto;min-height:48px;font-size:1rem}
+.result .actions .btn.primary{box-shadow:0 0 0 2px var(--card)}
+#flash{position:fixed;inset:0;pointer-events:none;z-index:40;border:0 solid transparent;opacity:0}
+#flash.on{opacity:1;border-width:14px;transition:none}
+#flash.off{opacity:0;transition:opacity .6s ease-out}
+@media (prefers-reduced-motion:reduce){#flash.off{transition:none}}
+.mach{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-top:1px solid var(--line)}
+.mach:first-child{border-top:0}
+.mach .n{font-family:var(--cond);font-weight:700;font-size:1.35rem;min-width:58px;line-height:44px}
+.mach .bs{display:flex;flex-wrap:wrap;gap:6px;flex:1}
+.binbtn{min-height:44px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.binbtn small{color:var(--muted);font-weight:500}
+.binbtn.cur{background:var(--film);color:var(--film-ink);border-color:var(--film)}
+.binbtn.cur small{color:inherit}
+.warnline{margin-top:8px;font-size:.9rem;color:var(--warn)}
 </style>
 </head>
 <body>
@@ -152,15 +170,15 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
   <div class="drop" style="margin-top:16px">
     <p style="font-weight:600">Step 1: import the SCWM Physical Stock export</p>
     <p class="muted small">.xlsx file. Data stays on this phone and is never uploaded. Storage type 610 is excluded automatically.</p>
-    <label class="btn primary" style="margin-top:10px">Choose file<input id="fileIn" type="file" accept=".xlsx,.xls,.csv" hidden></label>
+    <label class="btn primary" style="margin-top:10px">Choose file<input id="fileIn" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" hidden></label>
     <p id="setupMsg" class="small" style="margin-top:10px"></p>
   </div>
   <h2>How to use</h2>
   <ol class="muted" style="padding-left:20px;margin:0">
-    <li>Racking: scan the bin barcode, then scan each pallet label.</li>
-    <li>Machine or floor locations (101, 118, etc.): tap "Change", pick the location, then scan the pallets.</li>
-    <li>When a location is finished, tap "Location done", including empty ones. This is how the report tells a genuinely missing pallet from one that was never checked.</li>
-    <li>Go to "Report" to export the Excel file.</li>
+    <li>Racking: scan the bin barcode, then the pallet label. Scanning the next bin marks the previous one done automatically, including empty bins.</li>
+    <li>Shop floor: all machine areas (101 and 118) count as one location, "Shopfloor". Tap "Change" > Shopfloor, scan every pallet next to the machines, then tap "Location done".</li>
+    <li>Forgot to change location? When a pallet shows "Should be at…", tap "I'm at…" to correct it.</li>
+    <li>Go to "Report" to export. On iPhone the share sheet opens, so you can save to Files or send by email or Teams.</li>
   </ol>
 </section>
 
@@ -182,13 +200,18 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
     <button class="iconbtn" id="camBtn" title="Camera" aria-label="Toggle camera">📷</button>
   </div>
   <div id="reader" class="hidden"></div>
+  <button id="camStart" class="btn primary block hidden" style="margin-top:10px">📷 Tap to start camera</button>
+  <select id="camSel" class="search hidden" style="margin-top:8px" aria-label="Choose camera"></select>
   <p id="camMsg" class="small err hidden"></p>
+  <div id="recentBins" class="chips" style="margin-top:10px"></div>
+  <p id="sapAge" class="warnline hidden"></p>
 
   <div id="result" class="result info">
     <div class="big">Ready</div>
     <div class="small">Scan a bin, then scan pallet labels.</div>
   </div>
 
+  <div id="backupBanner" class="result info hidden"></div>
   <div class="row" style="margin-top:12px">
     <button class="btn grow" id="doneBin">✔ Location done</button>
     <button class="btn" id="undoBtn">↶ Undo</button>
@@ -245,7 +268,7 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
   <h2>SAP data</h2>
   <table class="kv" id="sapInfo"></table>
   <div class="row" style="margin-top:12px">
-    <label class="btn grow">Replace SAP export<input id="fileIn2" type="file" accept=".xlsx,.xls,.csv" hidden></label>
+    <label class="btn grow">Replace SAP export<input id="fileIn2" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" hidden></label>
     <button id="resetBtn" class="btn danger grow">Clear all scans</button>
   </div>
   <p class="small muted" style="margin-top:8px">Replacing the SAP export keeps your scans and re-checks them against the new data.</p>
@@ -269,11 +292,18 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
 </div>
 
 <div id="toast" class="toast hidden"></div>
+<div id="flash"></div>
 
 <script>
 /* HU count core logic — pure functions, no DOM */
 (function (root) {
   const EXCLUDED_TYPES = ['610'];
+  const SHOPFLOOR = 'SHOPFLOOR';
+  const GROUP_TYPES = { '101': SHOPFLOOR, '118': SHOPFLOOR };
+  function groupBin(bin, type) {
+    const t = type || String(bin || '').split(' ')[0];
+    return GROUP_TYPES[t] || bin;
+  }
 
   function normHU(v) {
     if (v === null || v === undefined) return '';
@@ -342,7 +372,8 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
 
     for (const r of rows) {
       const type = clean(r[c.type]);
-      const bin = clean(r[c.bin]);
+      const sapBin = clean(r[c.bin]);
+      const bin = groupBin(sapBin, type);
       const hu = normHU(r[c.hu]);
       if (!bin && !hu) continue; // totals / blank rows
       rowCount++;
@@ -358,18 +389,18 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
 
       if (EXCLUDED_TYPES.includes(type)) {
         excludedRows++;
-        if (hu) excluded[hu] = { pallet: top, bin, type };
-        if (top) excluded[top] = { pallet: top, bin, type };
+        if (hu) excluded[hu] = { pallet: top, bin: sapBin, type };
+        if (top) excluded[top] = { pallet: top, bin: sapBin, type };
         continue;
       }
       if (!top) {
-        noHU.push({ type, bin, product, desc, qty, uom, batch, stock });
+        noHU.push({ type, bin: sapBin, loc: bin, product, desc, qty, uom, batch, stock });
         continue;
       }
       let p = pallets[top];
       if (!p) {
-        p = pallets[top] = { hu: top, type, bin, products: [], descs: [], batches: [], stocks: [], qty: 0, uom, inner: [], gr };
-        if (!bins[bin]) bins[bin] = { bin, type, pallets: [] };
+        p = pallets[top] = { hu: top, type, bin, sapBin, products: [], descs: [], batches: [], stocks: [], qty: 0, uom, inner: [], gr };
+        if (!bins[bin]) bins[bin] = { bin, type: bin === SHOPFLOOR ? SHOPFLOOR : type, pallets: [] };
         bins[bin].pallets.push(top);
       }
       p.qty = Math.round((p.qty + qty) * 1000) / 1000;
@@ -382,12 +413,13 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
       if (hu) huMap[hu] = top;
     }
     // bins with no HU stock still count as bins
-    for (const n of noHU) if (!bins[n.bin]) bins[n.bin] = { bin: n.bin, type: n.type, pallets: [] };
+    for (const n of noHU) if (!bins[n.loc]) bins[n.loc] = { bin: n.loc, type: n.loc === SHOPFLOOR ? SHOPFLOOR : n.type, pallets: [] };
 
     const binIndex = {};
     for (const b in bins) binIndex[binKey(b)] = b;
 
     return {
+      version: 2,
       fileName: fileName || '',
       importedAt: new Date().toISOString(),
       rowCount, excludedRows,
@@ -441,9 +473,12 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
   }
 
   /* Build report tables from sap + scans + counted bins */
+  function isRackBin(b) { return /^500\s/.test(String(b || '')); }
+
   function buildReport(sap, scans, countedBins) {
     const counted = new Set(countedBins || []);
-    for (const s of scans) counted.add(s.bin);
+    // a scan only implies 'counted' for rack bins (1 pallet per bin); floor areas need an explicit Location done
+    for (const s of scans) if (isRackBin(s.bin)) counted.add(s.bin);
     const foundPallets = new Map();
     for (const s of scans) if (s.status !== 'unknown') foundPallets.set(s.pallet, s);
 
@@ -474,12 +509,12 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
       const exp = info.pallets.length;
       const got = info.pallets.filter(h => found.has(h)).length;
       const here = scannedIn[b] || [];
-      out.push({ bin: b, type: info.type, expected: exp, found: got, scannedHere: here.length, counted: counted.has(b) || here.length > 0 });
+      out.push({ bin: b, type: info.type, expected: exp, found: got, scannedHere: here.length, counted: counted.has(b) || (isRackBin(b) && here.length > 0) });
     }
     return out;
   }
 
-  const api = { normHU, binKey, buildSap, resolveBin, looksLikeRackBin, rackBinName, classify, buildReport, binProgress, EXCLUDED_TYPES };
+  const api = { SHOPFLOOR, groupBin, normHU, binKey, buildSap, resolveBin, looksLikeRackBin, rackBinName, classify, buildReport, binProgress, EXCLUDED_TYPES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.HUCore = api;
 })(this);
@@ -491,7 +526,7 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
 const C = window.HUCore;
 const LS_SAP='hucount.sap.v1', LS_STATE='hucount.state.v1';
 let SAP=null;
-let ST={scans:[],counted:[],currentBin:'',extraBins:[],by:''};
+let ST={scans:[],counted:[],currentBin:'',extraBins:[],by:'',camPref:false,camId:'',recentBins:[],backupAt:0};
 let downloads=null;
 if (window.claude && window.claude.use) {
   window.claude.use('downloads').then(d=>{downloads=d;}).catch(()=>{});
@@ -514,7 +549,7 @@ function tone(seq){
   if(!actx) return; let t=actx.currentTime;
   for(const [f,d] of seq){const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=f;o.type='square';g.gain.setValueAtTime(.08,t);g.gain.exponentialRampToValueAtTime(.0001,t+d);o.connect(g).connect(actx.destination);o.start(t);o.stop(t+d);t+=d+.03;}
 }
-const SND={match:[[1320,.09]],misplaced:[[880,.1],[660,.12]],unknown:[[220,.35]],dup:[[520,.08],[520,.08]],bin:[[1000,.05],[1400,.07]]};
+const SND={done:[[1320,.08],[1760,.12]],match:[[1320,.09]],misplaced:[[880,.1],[660,.12]],unknown:[[220,.35]],dup:[[520,.08],[520,.08]],bin:[[1000,.05],[1400,.07]]};
 
 /* ---------- toast ---------- */
 let tt=null;
@@ -542,7 +577,10 @@ async function importFile(file,msgEl){
     SAP=C.buildSap(rows,file.name);
     saveSap();
     // re-classify existing scans against new data
-    ST.scans=ST.scans.map(s=>Object.assign(C.classify(SAP,s.raw||s.hu,s.bin),{raw:s.raw||s.hu,time:s.time,by:s.by}));
+    const gb=b=>b?C.groupBin(b):b;
+    const uniq=a=>[...new Set(a.map(gb))];
+    ST.scans=ST.scans.map(s=>Object.assign(C.classify(SAP,s.raw||s.hu,gb(s.bin)),{raw:s.raw||s.hu,time:s.time,by:s.by}));
+    ST.counted=uniq(ST.counted); ST.extraBins=uniq(ST.extraBins).filter(b=>!SAP.bins[b]); ST.recentBins=uniq(ST.recentBins); ST.currentBin=gb(ST.currentBin);
     saveState();
     if(msgEl) msgEl.textContent='';
     toast('Imported '+Object.keys(SAP.pallets).length+' pallets');
@@ -555,21 +593,46 @@ $('fileIn2').addEventListener('change',e=>{importFile(e.target.files[0],null);e.
 /* ---------- bins ---------- */
 function binInfo(b){
   if(SAP.bins[b]) return SAP.bins[b];
-  return {bin:b,type:(b.split(' ')[0]||''),pallets:[]};
+  return {bin:b,type:(b===C.SHOPFLOOR?C.SHOPFLOOR:(b.split(' ')[0]||'')),pallets:[]};
 }
-function setBin(b,announce){
+const isRack=b=>binInfo(b).type==='500';
+function foundSet(){return new Set(ST.scans.filter(s=>s.status!=='unknown').map(s=>s.pallet));}
+function binStatus(b){const info=binInfo(b),f=foundSet();const got=info.pallets.filter(h=>f.has(h)).length;return {exp:info.pallets.length,got,miss:info.pallets.length-got};}
+function markDone(b){ if(b && !ST.counted.includes(b)) ST.counted.push(b); }
+function setBin(b,announce,autoPrev){
+  const prev=ST.currentBin; let prevMsg='';
+  if(autoPrev && prev && prev!==b && isRack(prev) && !ST.counted.includes(prev)){
+    markDone(prev); const st=binStatus(prev);
+    prevMsg=prev+' done'+(st.miss?(', '+st.miss+' missing'):'')+'. ';
+  }
   ST.currentBin=b;
   if(!SAP.bins[b] && !ST.extraBins.includes(b)) ST.extraBins.push(b);
+  if(!isRack(b)){ ST.recentBins=[b].concat(ST.recentBins.filter(x=>x!==b)).slice(0,6); }
   saveState(); renderScan();
-  if(announce){ tone(SND.bin); showResult('info',b,'Location set. '+binInfo(b).pallets.length+' pallet(s) expected here in SAP'); }
+  if(announce){
+    tone(SND.bin);
+    const n=binInfo(b).pallets.length;
+    showResult('info',b,prevMsg+(n?(n+' pallet(s) expected here in SAP'):'This location is empty in SAP'));
+  }
 }
 
 /* ---------- scanning ---------- */
 function palletLine(p){ if(!p) return ''; return [p.products[0]||'', p.descs[0]||'', p.qty?(p.qty+' '+p.uom):''].filter(Boolean).join('  '); }
-function showResult(cls,big,sub,hu){
+let resultActions=[];
+function showResult(cls,big,sub,hu,actions){
   const r=$('result'); r.className='result '+cls;
-  r.innerHTML=(hu?'<div class="hu">'+esc(hu)+'</div>':'')+'<div class="big">'+esc(big)+'</div>'+(sub?'<div class="small">'+esc(sub)+'</div>':'');
+  resultActions=actions||[];
+  r.innerHTML=(hu?'<div class="hu">'+esc(hu)+'</div>':'')+'<div class="big">'+esc(big)+'</div>'+(sub?'<div class="small">'+esc(sub)+'</div>':'')+
+    (resultActions.length?'<div class="actions">'+resultActions.map((a,i)=>'<button class="btn'+(a.primary?' primary':'')+'" data-act="'+i+'">'+esc(a.label)+'</button>').join('')+'</div>':'');
   void r.offsetWidth; r.classList.add('flash');
+  if(cls!=='info') screenFlash(cls);
+}
+$('result').addEventListener('click',e=>{const b=e.target.closest('[data-act]'); if(!b) return; const a=resultActions[+b.getAttribute('data-act')]; if(a) a.fn();});
+let flashT=null;
+function screenFlash(cls){
+  const f=$('flash'); const col=cls==='match'?'var(--ok)':cls==='misplaced'?'var(--warn)':'var(--bad)';
+  f.style.borderColor=col; f.className='on'; clearTimeout(flashT);
+  flashT=setTimeout(()=>{f.className='off';},180);
 }
 function handleCode(raw){
   raw=String(raw||'').trim(); if(!raw||!SAP) return;
@@ -578,21 +641,49 @@ function handleCode(raw){
   const isHU = !!(SAP.huMap[n]||SAP.excluded[n]);
   if(!isHU){
     const b=C.resolveBin(SAP,raw);
-    if(b){ setBin(b,true); return; }
-    if(C.looksLikeRackBin(raw)){ const nb=C.rackBinName(raw); setBin(nb,true); showResult('info',nb,'Location set. This location is empty in SAP'); return; }
+    if(b){ setBin(b,true,true); return; }
+    if(C.looksLikeRackBin(raw)){ setBin(C.rackBinName(raw),true,true); return; }
     if(/[\s-]/.test(raw)){ tone(SND.unknown); showResult('unknown','Code not recognised',raw); return; }
   }
-  if(!ST.currentBin){ tone(SND.unknown); showResult('unknown','Scan or choose a location first','Not recorded: '+raw); return; }
+  if(!ST.currentBin){
+    tone(SND.unknown);
+    const pal=SAP.huMap[n]; const sb=pal?SAP.pallets[pal].bin:'';
+    const acts=sb?[{label:'I\'m at '+sb,primary:true,fn:()=>{setBin(sb,false,false);handleCode(raw);}},{label:'Choose location',fn:openPicker}]:[{label:'Choose location',primary:true,fn:openPicker}];
+    showResult('unknown','Set a location first','Not recorded yet: '+(pal||n),'',acts); return;
+  }
   const res=C.classify(SAP,raw,ST.currentBin);
   const dup=ST.scans.find(s=>s.pallet===res.pallet);
   if(dup){ tone(SND.dup); showResult('info','Already scanned','At '+dup.bin+' ('+dup.time.slice(11,16)+')',res.pallet); return; }
   const rec=Object.assign(res,{raw,time:localIso(),by:ST.by||''});
   ST.scans.push(rec); saveState();
   const p=SAP.pallets[res.pallet];
-  if(res.status==='match'){ tone(SND.match); showResult('match','✅ Correct location',(res.inner?res.note+'  ':'')+palletLine(p),res.pallet); }
-  else if(res.status==='misplaced'){ tone(SND.misplaced); showResult('misplaced','🔀 Should be at '+res.expectedBin,(res.note?res.note+'  ':'')+palletLine(p),res.pallet); }
+  if(res.status==='match'){ afterMatch(rec,p); }
+  else if(res.status==='misplaced'){
+    tone(SND.misplaced);
+    const acts=[];
+    if(SAP.bins[res.expectedBin]) acts.push({label:'I\'m at '+(res.expectedBin===C.SHOPFLOOR?'Shopfloor':res.expectedBin),fn:()=>fixToExpected(rec)});
+    acts.push({label:'Keep: it\'s here',primary:true,fn:()=>showResult('misplaced','Recorded at '+rec.bin,'Wrong location: SAP says '+rec.expectedBin,rec.pallet)});
+    const exTxt=res.expectedBin+(p&&p.sapBin&&p.sapBin!==p.bin?' ('+p.sapBin+')':'');
+    showResult('misplaced','🔀 Should be at '+exTxt,'Found at '+rec.bin+'. '+(res.note?res.note+'  ':'')+palletLine(p),res.pallet,acts);
+  }
   else { tone(SND.unknown); showResult('unknown','➕ Not in SAP','Recorded at '+ST.currentBin,res.hu); }
   renderScan();
+}
+function afterMatch(rec,p){
+  const b=rec.bin; let sub=(rec.inner?rec.note+'  ':'')+(p&&p.sapBin&&p.sapBin!==p.bin?'SAP: '+p.sapBin+'  ':'')+palletLine(p);
+  const st=binStatus(b);
+  if(isRack(b) && st.miss===0 && st.exp>0){
+    markDone(b); saveState(); tone(SND.done); sub='Location complete. Scan the next bin.  '+sub;
+  } else { tone(SND.match); if(st.exp>1) sub=st.got+' of '+st.exp+' found here.  '+sub; }
+  showResult('match','✅ Correct location',sub,rec.pallet);
+  renderScan();
+}
+function fixToExpected(rec){
+  const prev=rec.bin;
+  rec.bin=rec.expectedBin; rec.status='match'; rec.note=(rec.note?rec.note+'; ':'')+'location corrected from '+prev;
+  ST.currentBin=rec.bin;
+  if(!isRack(rec.bin)) ST.recentBins=[rec.bin].concat(ST.recentBins.filter(x=>x!==rec.bin)).slice(0,6);
+  saveState(); afterMatch(rec,SAP.pallets[rec.pallet]);
 }
 function localIso(){const d=new Date(),z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+' '+z(d.getHours())+':'+z(d.getMinutes())+':'+z(d.getSeconds());}
 
@@ -606,29 +697,60 @@ $('kbBtn').addEventListener('click',()=>{
 });
 
 /* camera */
-let qr=null, camOn=false, lastCode='', lastAt=0;
-async function startCam(){
-  $('camMsg').classList.add('hidden');
-  if(typeof Html5Qrcode==='undefined'){ camErr('The scanner did not load. Check your connection.'); return; }
+let qr=null, camOn=false, camBusy=false, lastCode='', lastAt=0, camTried=false;
+async function startCam(auto){
+  if(camOn||camBusy) return; camBusy=true;
+  $('camMsg').classList.add('hidden'); $('camStart').classList.add('hidden');
+  if(typeof Html5Qrcode==='undefined'){ camErr('The scanner did not load. Check your connection.'); camBusy=false; return; }
   $('reader').classList.remove('hidden');
   try{
     const F=Html5QrcodeSupportedFormats;
-    qr=new Html5Qrcode('reader',{verbose:false,formatsToSupport:[F.CODE_128,F.CODE_39,F.EAN_13,F.ITF,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true}});
-    await qr.start({facingMode:'environment'},{fps:12,qrbox:(w,h)=>({width:Math.floor(w*.92),height:Math.max(80,Math.floor(h*.42))}),aspectRatio:1.6},
+    qr=new Html5Qrcode('reader',{verbose:false,formatsToSupport:[F.CODE_128,F.CODE_39,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true}});
+    const vc={width:{ideal:1280},height:{ideal:720},advanced:[{focusMode:'continuous'}]};
+    if(ST.camId) vc.deviceId={exact:ST.camId}; else vc.facingMode='environment';
+    await qr.start({facingMode:'environment'},{fps:15,videoConstraints:vc,qrbox:(w,h)=>({width:Math.floor(w*.94),height:Math.max(90,Math.floor(h*.55))})},
       txt=>{const now=Date.now(); if(txt===lastCode&&now-lastAt<2500) return; lastCode=txt; lastAt=now; handleCode(txt);}, ()=>{});
     camOn=true; $('camBtn').classList.add('on');
+    if(!ST.camPref){ST.camPref=true;saveState();}
+    camBusy=false;
+    setupCamList();
   }catch(e){
+    camBusy=false;
+    try{ if(qr) qr.clear(); }catch(_){}
     $('reader').classList.add('hidden'); qr=null;
-    camErr('Camera could not start. Open this link directly in Safari and allow camera access, or use manual entry or a Bluetooth scanner.');
+    if(ST.camId && !camTried){ camTried=true; ST.camId=''; saveState(); return startCam(auto); }
+    if(auto){ $('camStart').classList.remove('hidden'); }
+    else camErr('Camera could not start. Allow camera access for this site in Safari (aA menu > Website Settings), or use manual entry or a Bluetooth scanner.');
   }
 }
+async function setupCamList(){
+  let cams=[]; try{ cams=await Html5Qrcode.getCameras(); }catch(e){ return; }
+  const back=cams.filter(c=>!/front|user|facetime/i.test(c.label||''));
+  if(!ST.camId){
+    const best=back.find(c=>/triple/i.test(c.label))||back.find(c=>/dual wide/i.test(c.label));
+    if(best){ ST.camId=best.id; saveState(); await stopCam(true); return startCam(true); }
+  }
+  const sel=$('camSel');
+  if(back.length>1){
+    sel.innerHTML=back.map(c=>'<option value="'+esc(c.id)+'"'+(c.id===ST.camId?' selected':'')+'>'+esc(c.label||'Camera')+'</option>').join('');
+    if(!ST.camId) sel.insertAdjacentHTML('afterbegin','<option value="" selected>Default back camera</option>');
+    sel.classList.remove('hidden');
+  } else sel.classList.add('hidden');
+}
+$('camSel').addEventListener('change',async e=>{ ST.camId=e.target.value; saveState(); await stopCam(true); startCam(false); });
 function camErr(m){const el=$('camMsg');el.textContent=m;el.classList.remove('hidden');}
-async function stopCam(){ if(qr){ try{await qr.stop(); qr.clear();}catch(e){} } qr=null; camOn=false; $('reader').classList.add('hidden'); $('camBtn').classList.remove('on'); }
-$('camBtn').addEventListener('click',()=>{ ensureAudio(); camOn?stopCam():startCam(); });
+async function stopCam(keepPref){
+  if(qr){ try{await qr.stop(); qr.clear();}catch(e){} }
+  qr=null; camOn=false; $('reader').classList.add('hidden'); $('camBtn').classList.remove('on'); $('camSel').classList.add('hidden');
+  if(!keepPref){ ST.camPref=false; saveState(); }
+}
+$('camBtn').addEventListener('click',()=>{ ensureAudio(); camOn?stopCam(false):startCam(false); });
+$('camStart').addEventListener('click',()=>{ ensureAudio(); startCam(false); });
 
 $('undoBtn').addEventListener('click',()=>{
   const s=ST.scans.pop(); if(!s){toast('Nothing to undo');return;}
-  saveState(); renderScan(); toast('Removed '+s.pallet);
+  if(isRack(s.bin)){ const i=ST.counted.indexOf(s.bin); if(i>=0) ST.counted.splice(i,1); }
+  saveState(); renderScan(); showResult('info','Undone','Removed '+s.pallet+' at '+s.bin);
 });
 $('doneBin').addEventListener('click',()=>{
   const b=ST.currentBin; if(!b){toast('No location selected');return;}
@@ -642,7 +764,21 @@ $('doneBin').addEventListener('click',()=>{
 function statusDot(st){return st==='match'?'<span class="dot ok">✓</span>':st==='misplaced'?'<span class="dot warn">⇄</span>':'<span class="dot bad">+</span>';}
 function fitCode(){const el=$('binCode');let s=38;el.style.fontSize=s+'px';while(el.scrollWidth>el.clientWidth&&s>18){s-=2;el.style.fontSize=s+'px';}}
 window.addEventListener('resize',()=>{if(ST.currentBin)fitCode();});
+function renderExtras(){
+  const rb=ST.recentBins.filter(b=>SAP.bins[b]||ST.extraBins.includes(b));
+  $('recentBins').innerHTML=rb.length?rb.map(b=>'<button class="chip'+(b===ST.currentBin?' on':'')+'" data-bin="'+esc(b)+'">'+esc(b)+'</button>').join(''):'';
+  const ageH=(Date.now()-new Date(SAP.importedAt).getTime())/3600000;
+  const sa=$('sapAge');
+  if(!SAP.version){ sa.textContent='Re-import the SAP export (Report > Replace SAP export) to switch machine areas to the single Shopfloor location.'; sa.classList.remove('hidden'); }
+  else if(ageH>24){ sa.textContent='SAP data was imported '+SAP.importedAt.slice(0,10)+'. Import a fresh export if stock has moved since.'; sa.classList.remove('hidden'); } else sa.classList.add('hidden');
+  const since=ST.scans.length-(ST.backupAt||0), bb=$('backupBanner');
+  if(since>=100){ bb.innerHTML='<div class="small">'+since+' scans since the last backup.</div><div class="actions"><button class="btn primary" id="bbNow">Back up now</button></div>'; bb.classList.remove('hidden'); }
+  else bb.classList.add('hidden');
+}
+$('recentBins').addEventListener('click',e=>{const b=e.target.closest('[data-bin]'); if(!b) return; ensureAudio(); setBin(b.getAttribute('data-bin'),true,false);});
+$('backupBanner').addEventListener('click',e=>{ if(e.target.id==='bbNow') doBackup(); });
 function renderScan(){
+  renderExtras();
   const b=ST.currentBin;
   const code=$('binCode'), meta=$('binMeta');
   if(!b){ code.textContent='No location'; code.className='code none'; code.style.fontSize=''; meta.textContent='Scan a bin barcode or tap "Change"'; $('expList').innerHTML='<div class="item muted">No location selected</div>'; $('doneBin').textContent='✔ Location done'; }
@@ -660,7 +796,7 @@ function renderScan(){
       $('expList').innerHTML=info.pallets.map(h=>{
         const p=SAP.pallets[h]; const f=ST.scans.find(s=>s.pallet===h);
         const dot=f?(f.bin===b?'<span class="dot ok">✓</span>':'<span class="dot warn">⇄</span>'):'<span class="dot"></span>';
-        const sub=f&&f.bin!==b?('Found at '+f.bin):palletLine(p);
+        const sub=f&&f.bin!==b?('Found at '+f.bin):((p.sapBin&&p.sapBin!==p.bin?p.sapBin+'  ':'')+palletLine(p));
         return '<div class="item">'+dot+'<div class="main"><div class="t">'+esc(h)+'</div><div class="s">'+esc(sub)+'</div></div></div>';
       }).join('');
     }
@@ -681,26 +817,37 @@ $('recentList').addEventListener('click',e=>{
 
 /* ---------- bin picker ---------- */
 function openPicker(){ $('binSheet').classList.remove('hidden'); $('pickSearch').value=''; renderPicker(); }
+function machineOf(b){ const m=String(b).match(/^(\S+)\s+(\d{4})(?:\s+(.+))?$/); return m?{mc:m[2],label:m[1]+(m[3]?' '+m[3]:'')}:null; }
 function renderPicker(){
   const q=C.binKey($('pickSearch').value);
   const all=Object.keys(SAP.bins).concat(ST.extraBins.filter(b=>!SAP.bins[b]));
   let html='';
   if(q){
-    const hits=all.filter(b=>C.binKey(b).includes(q)).sort().slice(0,80);
+    const hits=all.filter(b=>C.binKey(b).includes(q)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,80);
     html=hits.length?'<div class="list">'+hits.map(pickItem).join('')+'</div>':'<p class="muted">No matching location</p>';
   }else{
-    const groups={};
-    for(const b of all){const t=binInfo(b).type; if(t==='500') continue; (groups[t]=groups[t]||[]).push(b);}
-    for(const t of Object.keys(groups).sort()){
-      html+='<div class="grp">Storage type '+esc(t)+'</div><div class="list">'+groups[t].sort().map(pickItem).join('')+'</div>';
+    if(SAP.bins[C.SHOPFLOOR]) html+='<div class="grp">Shop floor (all 101 and 118 machine areas)</div><div class="list"><div class="mach"><div class="bs">'+binBtn(C.SHOPFLOOR,'Shopfloor')+'</div></div></div>';
+    const rb=ST.recentBins.filter(b=>all.includes(b)&&b!==C.SHOPFLOOR);
+    if(rb.length) html+='<div class="grp">Recent</div><div class="list"><div class="mach"><div class="bs">'+rb.map(b=>binBtn(b,b)).join('')+'</div></div></div>';
+    const mach={}, other=[];
+    for(const b of all){ if(binInfo(b).type==='500'||b===C.SHOPFLOOR) continue; const m=machineOf(b); if(m) (mach[m.mc]=mach[m.mc]||[]).push({b,label:m.label}); else other.push(b); }
+    const keys=Object.keys(mach).sort();
+    if(keys.length){
+      html+='<div class="grp">Machines</div><div class="list">'+keys.map(k=>'<div class="mach"><div class="n">'+esc(k)+'</div><div class="bs">'+
+        mach[k].sort((a,b)=>a.label.localeCompare(b.label)).map(x=>binBtn(x.b,x.label)).join('')+'</div></div>').join('')+'</div>';
     }
+    if(other.length) html+='<div class="grp">Other areas</div><div class="list"><div class="mach"><div class="bs">'+other.sort().map(b=>binBtn(b,b)).join('')+'</div></div></div>';
     html+='<p class="small muted" style="margin-top:12px">For racking (500), scan the bin barcode or search above.</p>';
   }
   $('pickBody').innerHTML=html;
 }
+function binBtn(b,label){
+  const st=binStatus(b); const done=ST.counted.includes(b)?' ✓':'';
+  return '<button class="binbtn'+(b===ST.currentBin?' cur':'')+'" data-bin="'+esc(b)+'">'+esc(label)+' <small>'+st.got+'/'+st.exp+done+'</small></button>';
+}
 function pickItem(b){
-  const n=binInfo(b).pallets.length;
-  return '<button class="item" data-bin="'+esc(b)+'"><div class="main"><div class="t">'+esc(b)+'</div></div><span class="frac">'+n+'</span></button>';
+  const st=binStatus(b);
+  return '<button class="item" data-bin="'+esc(b)+'"><div class="main"><div class="t">'+esc(b)+'</div></div><span class="frac">'+st.got+' / '+st.exp+'</span></button>';
 }
 $('pickBin').addEventListener('click',openPicker);
 $('closePick').addEventListener('click',()=>$('binSheet').classList.add('hidden'));
@@ -708,7 +855,7 @@ $('binSheet').addEventListener('click',e=>{ if(e.target.id==='binSheet') $('binS
 $('pickSearch').addEventListener('input',renderPicker);
 $('pickBody').addEventListener('click',e=>{
   const it=e.target.closest('[data-bin]'); if(!it) return;
-  $('binSheet').classList.add('hidden'); ensureAudio(); setBin(it.getAttribute('data-bin'),true); showTab('scan');
+  $('binSheet').classList.add('hidden'); ensureAudio(); setBin(it.getAttribute('data-bin'),true,false); showTab('scan');
 });
 
 /* ---------- progress tab ---------- */
@@ -725,7 +872,7 @@ function renderProg(){
   $('stUnk').textContent=rep.unknown.length;
 
   let rows=C.binProgress(SAP,ST.scans,ST.counted);
-  for(const b of ST.extraBins) if(!SAP.bins[b]){ const here=ST.scans.filter(s=>s.bin===b).length; rows.push({bin:b,type:binInfo(b).type,expected:0,found:0,scannedHere:here,counted:ST.counted.includes(b)||here>0}); }
+  for(const b of ST.extraBins) if(!SAP.bins[b]){ const here=ST.scans.filter(s=>s.bin===b).length; rows.push({bin:b,type:binInfo(b).type,expected:0,found:0,scannedHere:here,counted:ST.counted.includes(b)||(/^500\s/.test(b)&&here>0)}); }
   const types=[...new Set(rows.map(r=>r.type))].sort();
   $('typeChips').innerHTML='<button class="chip'+(ptype===''?' on':'')+'" data-t="">All types</button>'+types.map(t=>'<button class="chip'+(ptype===t?' on':'')+'" data-t="'+esc(t)+'">'+esc(t)+'</button>').join('');
   const q=C.binKey($('binSearch').value);
@@ -745,7 +892,7 @@ $('filterChips').addEventListener('click',e=>{const f=e.target.getAttribute('dat
 $('typeChips').addEventListener('click',e=>{const t=e.target.getAttribute('data-t'); if(t===null) return; ptype=t; pLimit=150; renderProg();});
 $('binSearch').addEventListener('input',()=>{pLimit=150;renderProg();});
 $('moreBins').addEventListener('click',()=>{pLimit+=300;renderProg();});
-$('binList').addEventListener('click',e=>{const it=e.target.closest('[data-bin]'); if(!it) return; setBin(it.getAttribute('data-bin'),false); showTab('scan');});
+$('binList').addEventListener('click',e=>{const it=e.target.closest('[data-bin]'); if(!it) return; setBin(it.getAttribute('data-bin'),false,false); showTab('scan');});
 
 /* ---------- report tab ---------- */
 function renderRep(){
@@ -759,16 +906,23 @@ function renderRep(){
 }
 $('byName').addEventListener('change',e=>{ST.by=e.target.value.trim();saveState();toast('Saved');});
 
-async function saveFile(name,data){
+async function saveFile(name,data,mime){
+  const blob=data instanceof Blob?data:new Blob([data],{type:mime});
+  try{
+    const file=new File([blob],name,{type:mime});
+    if(navigator.canShare && navigator.share && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file],title:name}); return true;
+    }
+  }catch(e){ if(e&&e.name==='AbortError') return false; }
   if(downloads){
-    try{ await downloads.save({filename:name,data}); toast('Exported '+name); }
-    catch(e){ if(e&&e.code==='declined') return; toast('Export failed: '+(e&&e.message||'please try again')); }
-    return;
+    try{ await downloads.save({filename:name,data:blob}); toast('Exported '+name); return true; }
+    catch(e){ if(e&&e.code==='declined') return false; toast('Export failed: '+(e&&e.message||'please try again')); return false; }
   }
-  const blob=data instanceof Blob?data:new Blob([data]);
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click();
-  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
+  toast('Saved '+name); return true;
 }
+const XLSX_MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 function stamp(){return localIso().replace(/[-:]/g,'').replace(' ','_').slice(0,13);}
 
 function pCols(p){ return p?{'Product':p.products.join(', '),'Description':p.descs.join(' | '),'Quantity':p.qty,'UoM':p.uom,'Batch':p.batches.join(', '),'Stock Type':p.stocks.join(', '),'GR Date':p.gr,'Inner HU count':p.inner.length}:{}; }
@@ -783,10 +937,10 @@ function buildWorkbook(){
     ['Locations counted',rep.counted.size],['Total locations',Object.keys(SAP.bins).length],['',''],
     ['Note','Missing does not mean the pallet does not exist. First rule out wrong locations and goods issues not yet posted, then post differences through Physical Inventory.']
   ];
-  const matched=rep.matched.map(({s,p})=>Object.assign({'Pallet HU':s.pallet,'Storage Type':p.type,'Storage Bin':p.bin},pCols(p),{'Scanned HU':s.hu,'Scanned At':s.time,'By':s.by||''}));
-  const misplaced=rep.misplaced.map(({s,p})=>Object.assign({'Pallet HU':s.pallet,'SAP Bin':s.expectedBin,'Found Bin':s.bin,'Suggested Action':p?'Bin transfer':'Check 610 / external stock'},pCols(p),{'Scanned HU':s.hu,'Scanned At':s.time,'By':s.by||'','Note':s.note||''}));
-  const sortMiss=(a,b)=>(b.binCounted-a.binCounted)||a.p.bin.localeCompare(b.p.bin,undefined,{numeric:true});
-  const missing=rep.missing.slice().sort(sortMiss).map(({p,binCounted})=>Object.assign({'Pallet HU':p.hu,'Storage Type':p.type,'Storage Bin':p.bin,'Status':binCounted?'Not found – bin counted':'Bin not counted yet'},pCols(p),{'Inner HUs':p.inner.join(', ')}));
+  const matched=rep.matched.map(({s,p})=>Object.assign({'Pallet HU':s.pallet,'Storage Type':p.type,'Storage Bin':p.sapBin||p.bin,'Count Location':p.bin},pCols(p),{'Scanned HU':s.hu,'Scanned At':s.time,'By':s.by||''}));
+  const misplaced=rep.misplaced.map(({s,p})=>Object.assign({'Pallet HU':s.pallet,'SAP Bin':(p&&p.sapBin)||s.expectedBin,'Found Bin':s.bin,'Suggested Action':p?'Bin transfer':'Check 610 / external stock'},pCols(p),{'Scanned HU':s.hu,'Scanned At':s.time,'By':s.by||'','Note':s.note||''}));
+  const sortMiss=(a,b)=>(b.binCounted-a.binCounted)||(a.p.sapBin||a.p.bin).localeCompare(b.p.sapBin||b.p.bin,undefined,{numeric:true});
+  const missing=rep.missing.slice().sort(sortMiss).map(({p,binCounted})=>Object.assign({'Pallet HU':p.hu,'Storage Type':p.type,'Storage Bin':p.sapBin||p.bin,'Count Location':p.bin,'Status':binCounted?'Not found – location counted':'Location not counted yet'},pCols(p),{'Inner HUs':p.inner.join(', ')}));
   const unknown=rep.unknown.map(({s})=>({'Scanned HU':s.hu,'Raw Barcode':s.raw||'','Found Bin':s.bin,'Scanned At':s.time,'By':s.by||''}));
   const nohu=SAP.noHU.map(n=>({'Storage Type':n.type,'Storage Bin':n.bin,'Product':n.product,'Description':n.desc,'Quantity':n.qty,'UoM':n.uom,'Batch':n.batch,'Stock Type':n.stock}));
   const log=ST.scans.map(s=>({'Scanned At':s.time,'By':s.by||'','Bin':s.bin,'Raw Barcode':s.raw||'','HU':s.hu,'Pallet HU':s.pallet,'Status':s.status,'SAP Bin':s.expectedBin||'','Note':s.note||''}));
@@ -804,13 +958,15 @@ function autoW(ws){
   ws['!cols']=w;
 }
 $('exportXlsx').addEventListener('click',async()=>{
-  try{ const buf=buildWorkbook(); await saveFile('Pallet_Count_'+stamp()+'.xlsx',new Blob([buf])); }
+  try{ const buf=buildWorkbook(); await saveFile('Pallet_Count_'+stamp()+'.xlsx',new Blob([buf],{type:XLSX_MIME}),XLSX_MIME); }
   catch(e){ toast('Export failed: '+(e.message||e)); }
 });
-$('backupBtn').addEventListener('click',()=>{
+async function doBackup(){
   const data=JSON.stringify({kind:'hucount-backup',v:1,at:localIso(),by:ST.by,scans:ST.scans,counted:ST.counted,extraBins:ST.extraBins});
-  saveFile('Pallet_Count_Backup_'+stamp()+'.json',data);
-});
+  const ok=await saveFile('Pallet_Count_Backup_'+(ST.by?ST.by.replace(/[^A-Za-z0-9]+/g,'_')+'_':'')+stamp()+'.json',data,'application/json');
+  if(ok){ ST.backupAt=ST.scans.length; saveState(); renderExtras(); }
+}
+$('backupBtn').addEventListener('click',doBackup);
 $('mergeIn').addEventListener('change',e=>{
   const f=e.target.files[0]; e.target.value=''; if(!f) return;
   const r=new FileReader();
@@ -838,14 +994,18 @@ $('resetBtn').addEventListener('click',()=>{
 function showTab(t){
   for(const x of ['scan','prog','rep']) $('tab-'+x).classList.toggle('hidden',x!==t);
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.getAttribute('data-tab')===t));
-  if(t!=='scan' && camOn) stopCam();
-  if(t==='scan') renderScan(); else if(t==='prog') renderProg(); else renderRep();
+  if(t!=='scan' && camOn) stopCam(true);
+  if(t==='scan'){ renderScan(); if(ST.camPref && !camOn) startCam(true); } else if(t==='prog') renderProg(); else renderRep();
   window.scrollTo(0,0);
 }
 $('tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]'); if(b) showTab(b.getAttribute('data-tab'));});
 function renderAll(){renderScan(); if(!$('tab-prog').classList.contains('hidden')) renderProg(); if(!$('tab-rep').classList.contains('hidden')) renderRep();}
 function showApp(){ $('setup').classList.add('hidden'); $('tabs').classList.remove('hidden'); showTab('scan'); }
 
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){ if(camOn) stopCam(true); }
+  else if(ST.camPref && !camOn && !$('tab-scan').classList.contains('hidden')) startCam(true);
+});
 load();
 if(SAP&&SAP.pallets) showApp(); else $('setup').classList.remove('hidden');
 })();
