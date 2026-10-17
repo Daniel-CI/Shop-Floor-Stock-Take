@@ -200,7 +200,7 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
   <p class="muted">Scan pallets on site and reconcile them against SCWM Physical Stock.</p>
   <div class="drop" style="margin-top:16px">
     <p style="font-weight:600">Step 1: import the SCWM Physical Stock export</p>
-    <p class="muted small">.xlsx file. Data stays on this phone and is never uploaded. Storage type 610 is excluded automatically.</p>
+    <p class="muted small">.xlsx file. Data stays on this phone and is never uploaded. 101/118 count as Shopfloor and 610 as TTS.</p>
     <label class="btn primary" style="margin-top:10px">Choose file<input id="fileIn" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" hidden></label>
     <p id="setupMsg" class="small" style="margin-top:10px"></p>
   </div>
@@ -208,6 +208,7 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
   <ol class="muted" style="padding-left:20px;margin:0">
     <li>Racking, quick way: tap "Change" > "500 – Warehouse" and scan any pallet in the racking. Tap "Location done" when the whole warehouse is finished.</li>
     <li>Racking, exact way: scan the bin barcode, then the pallet label. Scanning the next bin marks the previous one done automatically, including empty bins.</li>
+    <li>610 TTS: tap "Change" > "610 – TTS" and scan every pallet there, then tap "Location done".</li>
     <li>Shop floor: all machine areas (101 and 118) count as one location, "Shopfloor". Tap "Change" > Shopfloor, scan every pallet next to the machines, then tap "Location done".</li>
     <li>Forgot to change location? When a pallet shows "Should be at…", tap "I'm at…" to correct it.</li>
     <li>Label unreadable? Tap "Found" next to the pallet in "Expected pallets here".</li>
@@ -337,6 +338,8 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
   <input id="cfgEx" class="search" placeholder="610">
   <label class="small muted" for="cfgSf" style="display:block;margin-top:8px">Storage types counted as Shopfloor</label>
   <input id="cfgSf" class="search" placeholder="101, 118">
+  <label class="small muted" for="cfgTt" style="display:block;margin-top:8px">Storage types counted as TTS</label>
+  <input id="cfgTt" class="search" placeholder="610">
   <button id="cfgSave" class="btn block" style="margin-top:8px">Save settings</button>
   <p class="small muted" style="margin-top:6px">Settings apply the next time you import the SAP export.</p>
 
@@ -382,16 +385,22 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
   const EXCLUDED_TYPES = ['610'];
   const SHOPFLOOR = 'SHOPFLOOR';
   const WAREHOUSE = 'WAREHOUSE';
-  const DEFAULT_CFG = { exclude: ['610'], shopfloor: ['101', '118'] };
+  const TTS = 'TTS610';
+  const DEFAULT_CFG = { exclude: [], shopfloor: ['101', '118'], tts: ['610'] };
+  const VIRTUAL = [SHOPFLOOR, TTS];
   function normCfg(cfg) {
     const list = v => (Array.isArray(v) ? v : String(v || '').split(/[\s,;]+/)).map(x => String(x).trim()).filter(Boolean);
     cfg = cfg || {};
-    return { exclude: cfg.exclude !== undefined ? list(cfg.exclude) : DEFAULT_CFG.exclude.slice(), shopfloor: cfg.shopfloor !== undefined ? list(cfg.shopfloor) : DEFAULT_CFG.shopfloor.slice() };
+    const tts = cfg.tts !== undefined ? list(cfg.tts) : DEFAULT_CFG.tts.slice();
+    const sf = cfg.shopfloor !== undefined ? list(cfg.shopfloor) : DEFAULT_CFG.shopfloor.slice();
+    const ex = (cfg.exclude !== undefined ? list(cfg.exclude) : DEFAULT_CFG.exclude.slice()).filter(t => !tts.includes(t) && !sf.includes(t));
+    return { exclude: ex, shopfloor: sf, tts };
   }
   function groupBin(bin, type, cfg) {
     const t = type || String(bin || '').split(' ')[0];
     const sf = (cfg && cfg.shopfloor) || DEFAULT_CFG.shopfloor;
-    return sf.includes(t) ? SHOPFLOOR : bin;
+    const tt = (cfg && cfg.tts) || DEFAULT_CFG.tts;
+    return sf.includes(t) ? SHOPFLOOR : tt.includes(t) ? TTS : bin;
   }
 
   function normHU(v) {
@@ -490,7 +499,7 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
       let p = pallets[top];
       if (!p) {
         p = pallets[top] = { hu: top, type, bin, sapBin, products: [], descs: [], batches: [], stocks: [], qty: 0, uom, inner: [], gr };
-        if (!bins[bin]) bins[bin] = { bin, type: bin === SHOPFLOOR ? SHOPFLOOR : type, pallets: [] };
+        if (!bins[bin]) bins[bin] = { bin, type: VIRTUAL.includes(bin) ? bin : type, pallets: [] };
         bins[bin].pallets.push(top);
       }
       p.qty = Math.round((p.qty + qty) * 1000) / 1000;
@@ -503,7 +512,7 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
       if (hu) huMap[hu] = top;
     }
     // bins with no HU stock still count as bins
-    for (const n of noHU) if (!bins[n.loc]) bins[n.loc] = { bin: n.loc, type: n.loc === SHOPFLOOR ? SHOPFLOOR : n.type, pallets: [] };
+    for (const n of noHU) if (!bins[n.loc]) bins[n.loc] = { bin: n.loc, type: VIRTUAL.includes(n.loc) ? n.loc : n.type, pallets: [] };
 
     const binIndex = {};
     for (const b in bins) binIndex[binKey(b)] = b;
@@ -519,19 +528,21 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
   }
 
   function migrateSap(sap) {
+    if (sap && sap.version >= 2 && (!sap.cfg || !sap.cfg.tts)) { sap.needReimport = true; return false; }
     if (!sap || sap.version >= 2) return false;
+    if (!sap.cfg || !sap.cfg.tts) sap.needReimport = true;
     sap.cfg = normCfg(sap.cfg);
     const bins = {};
     for (const hu in sap.pallets) {
       const p = sap.pallets[hu];
       if (!p.sapBin) p.sapBin = p.bin;
       p.bin = groupBin(p.sapBin, p.type, sap.cfg);
-      if (!bins[p.bin]) bins[p.bin] = { bin: p.bin, type: p.bin === SHOPFLOOR ? SHOPFLOOR : p.type, pallets: [] };
+      if (!bins[p.bin]) bins[p.bin] = { bin: p.bin, type: VIRTUAL.includes(p.bin) ? p.bin : p.type, pallets: [] };
       bins[p.bin].pallets.push(hu);
     }
     for (const n of sap.noHU || []) {
       n.loc = groupBin(n.bin, n.type, sap.cfg);
-      if (!bins[n.loc]) bins[n.loc] = { bin: n.loc, type: n.loc === SHOPFLOOR ? SHOPFLOOR : n.type, pallets: [] };
+      if (!bins[n.loc]) bins[n.loc] = { bin: n.loc, type: VIRTUAL.includes(n.loc) ? n.loc : n.type, pallets: [] };
     }
     sap.bins = bins;
     sap.binIndex = {};
@@ -629,7 +640,7 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
     return out;
   }
 
-  const api = { normCfg, DEFAULT_CFG, migrateSap, WAREHOUSE, SHOPFLOOR, groupBin, normHU, binKey, buildSap, resolveBin, looksLikeRackBin, rackBinName, classify, buildReport, binProgress, EXCLUDED_TYPES };
+  const api = { TTS, VIRTUAL, normCfg, DEFAULT_CFG, migrateSap, WAREHOUSE, SHOPFLOOR, groupBin, normHU, binKey, buildSap, resolveBin, looksLikeRackBin, rackBinName, classify, buildReport, binProgress, EXCLUDED_TYPES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.HUCore = api;
 })(this);
@@ -641,7 +652,7 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
 const C = window.HUCore;
 const LS_SAP='hucount.sap.v1', LS_STATE='hucount.state.v1';
 let SAP=null;
-const APP_VERSION='10', APP_DATE='17 Oct 2026';
+const APP_VERSION='12', APP_DATE='17 Oct 2026';
 let ST={scans:[],counted:[],currentBin:'',extraBins:[],by:'',recentBins:[],backupAt:0,res:{},cfg:null,recheck:null};
 let downloads=null;
 if (window.claude && window.claude.use) {
@@ -734,6 +745,7 @@ $('fileIn').addEventListener('change',e=>importFile(e.target.files[0],$('setupMs
 $('fileIn2').addEventListener('change',e=>{importFile(e.target.files[0],null);e.target.value='';});
 
 /* ---------- bins ---------- */
+const locName=b=>b===C.WAREHOUSE?'500 Warehouse':b===C.SHOPFLOOR?'Shopfloor':b===C.TTS?'610 TTS':b;
 let whCache=null;
 function binInfo(b){
   if(b===C.WAREHOUSE){
@@ -741,7 +753,7 @@ function binInfo(b){
     return whCache.info;
   }
   if(SAP.bins[b]) return SAP.bins[b];
-  return {bin:b,type:(b===C.SHOPFLOOR?C.SHOPFLOOR:(b.split(' ')[0]||'')),pallets:[]};
+  return {bin:b,type:(C.VIRTUAL.includes(b)?b:(b.split(' ')[0]||'')),pallets:[]};
 }
 const isRack=b=>binInfo(b).type==='500';
 function foundSet(){return new Set(ST.scans.filter(s=>s.status!=='unknown').map(s=>s.pallet));}
@@ -754,7 +766,7 @@ function setBin(b,announce,autoPrev){
     prevMsg=prev+' done'+(st.miss?(', '+st.miss+' missing'):'')+'. ';
   }
   ST.currentBin=b;
-  if(!SAP.bins[b] && b!==C.WAREHOUSE && b!==C.SHOPFLOOR && !ST.extraBins.includes(b)) ST.extraBins.push(b);
+  if(!SAP.bins[b] && b!==C.WAREHOUSE && !C.VIRTUAL.includes(b) && !ST.extraBins.includes(b)) ST.extraBins.push(b);
   if(!isRack(b)){ ST.recentBins=[b].concat(ST.recentBins.filter(x=>x!==b)).slice(0,6); }
   saveState(); renderScan();
   if(announce){
@@ -829,12 +841,12 @@ function handleCode(raw){
   else if(res.status==='misplaced'){
     tone(SND.misplaced);
     const acts=[];
-    if(SAP.bins[res.expectedBin]) acts.push({label:'I\'m at '+(res.expectedBin===C.SHOPFLOOR?'Shopfloor':res.expectedBin),fn:()=>fixToExpected(rec)});
-    acts.push({label:'Keep: it\'s here',primary:true,fn:()=>showResult('misplaced','Recorded at '+rec.bin,'Wrong location: SAP says '+rec.expectedBin,rec.pallet)});
-    const exTxt=res.expectedBin+(p&&p.sapBin&&p.sapBin!==p.bin?' ('+p.sapBin+')':'');
-    showResult('misplaced','🔀 Should be at '+exTxt,'Found at '+rec.bin+'. '+(res.note?res.note+'  ':'')+palletLine(p),res.pallet,acts);
+    if(SAP.bins[res.expectedBin]) acts.push({label:'I\'m at '+locName(res.expectedBin),fn:()=>fixToExpected(rec)});
+    acts.push({label:'Keep: it\'s here',primary:true,fn:()=>showResult('misplaced','Recorded at '+locName(rec.bin),'Wrong location: SAP says '+locName(rec.expectedBin),rec.pallet)});
+    const exTxt=locName(res.expectedBin)+(p&&p.sapBin&&p.sapBin!==p.bin?' ('+p.sapBin+')':'');
+    showResult('misplaced','🔀 Should be at '+exTxt,'Found at '+locName(rec.bin)+'. '+(res.note?res.note+'  ':'')+palletLine(p),res.pallet,acts);
   }
-  else { tone(SND.unknown); showResult('unknown','➕ Not in SAP','Recorded at '+ST.currentBin,res.hu); }
+  else { tone(SND.unknown); showResult('unknown','➕ Not in SAP','Recorded at '+locName(ST.currentBin),res.hu); }
   renderScan();
 }
 function afterMatch(rec,p){
@@ -942,10 +954,11 @@ function fitCode(){const el=$('binCode');let s=38;el.style.fontSize=s+'px';while
 window.addEventListener('resize',()=>{if(ST.currentBin)fitCode();});
 function renderExtras(){
   const rb=ST.recentBins.filter(b=>SAP.bins[b]||b===C.WAREHOUSE||ST.extraBins.includes(b));
-  $('recentBins').innerHTML=rb.length?rb.map(b=>'<button class="chip'+(b===ST.currentBin?' on':'')+'" data-bin="'+esc(b)+'">'+esc(b===C.WAREHOUSE?'500 Warehouse':b===C.SHOPFLOOR?'Shopfloor':b)+'</button>').join(''):'';
+  $('recentBins').innerHTML=rb.length?rb.map(b=>'<button class="chip'+(b===ST.currentBin?' on':'')+'" data-bin="'+esc(b)+'">'+esc(locName(b))+'</button>').join(''):'';
   const ageH=(Date.now()-new Date(SAP.importedAt).getTime())/3600000;
   const sa=$('sapAge');
-  if(ageH>24*14){ sa.textContent='SAP data on this phone is '+Math.floor(ageH/24)+' days old. Import a fresh export, or remove it (Report > Remove SAP data) if the count is finished.'; sa.classList.remove('hidden'); }
+  if(SAP.needReimport){ sa.textContent='Import the SAP export again (Report > Replace SAP export) so the 610 TTS location gets its pallets. Your scans are kept.'; sa.classList.remove('hidden'); }
+  else if(ageH>24*14){ sa.textContent='SAP data on this phone is '+Math.floor(ageH/24)+' days old. Import a fresh export, or remove it (Report > Remove SAP data) if the count is finished.'; sa.classList.remove('hidden'); }
   else if(ageH>24){ sa.textContent='SAP data was imported '+SAP.importedAt.slice(0,10)+'. Import a fresh export if stock has moved since.'; sa.classList.remove('hidden'); } else sa.classList.add('hidden');
   const since=ST.scans.length-(ST.backupAt||0), bb=$('backupBanner');
   if(since>=100){ bb.innerHTML='<div class="small">'+since+' scans since the last backup.</div><div class="actions"><button class="btn primary" id="bbNow">Back up now</button></div>'; bb.classList.remove('hidden'); }
@@ -963,7 +976,7 @@ function renderScan(){
     const found=new Set(ST.scans.filter(s=>s.status!=='unknown').map(s=>s.pallet));
     const got=info.pallets.filter(h=>found.has(h)).length;
     const here=ST.scans.filter(s=>s.bin===b).length;
-    code.textContent=b===C.WAREHOUSE?'500 Warehouse':b; code.className='code'; fitCode();
+    code.textContent=locName(b); code.className='code'; fitCode();
     const done=ST.counted.includes(b);
     meta.innerHTML='Expected <b>'+info.pallets.length+'</b>  Found <b>'+got+'</b>  Here <b>'+here+'</b>'+(done?'  ✔ Done':'');
     $('doneBin').textContent=done?'Reopen location':'✔ Location done';
@@ -1023,11 +1036,12 @@ function renderPicker(){
     html+='<div class="grp">Main areas</div><div class="list">'+
       '<div class="mach"><div class="bs">'+binBtn(C.WAREHOUSE,'500 – Warehouse')+'</div></div>'+
       '<div class="mach"><div class="bs">'+binBtn(C.SHOPFLOOR,'Shopfloor')+'</div></div>'+
+      '<div class="mach"><div class="bs">'+binBtn(C.TTS,'610 – TTS')+'</div></div>'+
       '</div><p class="small muted">500 – Warehouse: scan any pallet in the racking without scanning bin labels. Scan a bin label instead if you want to check the exact rack position.</p>';
-    const rb=ST.recentBins.filter(b=>all.includes(b)&&b!==C.SHOPFLOOR);
+    const rb=ST.recentBins.filter(b=>all.includes(b)&&!C.VIRTUAL.includes(b));
     if(rb.length) html+='<div class="grp">Recent</div><div class="list"><div class="mach"><div class="bs">'+rb.map(b=>binBtn(b,b)).join('')+'</div></div></div>';
     const mach={}, other=[];
-    for(const b of all){ if(binInfo(b).type==='500'||b===C.SHOPFLOOR) continue; const m=machineOf(b); if(m) (mach[m.mc]=mach[m.mc]||[]).push({b,label:m.label}); else other.push(b); }
+    for(const b of all){ if(binInfo(b).type==='500'||C.VIRTUAL.includes(b)) continue; const m=machineOf(b); if(m) (mach[m.mc]=mach[m.mc]||[]).push({b,label:m.label}); else other.push(b); }
     const keys=Object.keys(mach).sort();
     if(keys.length){
       html+='<div class="grp">Machines</div><div class="list">'+keys.map(k=>'<div class="mach"><div class="n">'+esc(k)+'</div><div class="bs">'+
@@ -1112,7 +1126,7 @@ const REASONS={
 };
 const DEFAULT_ACTION={M:'Investigate before posting',U:'Investigate',W:'Bin transfer in SAP'};
 function reasonOf(kind,key){ const r=ST.res[kind+':'+key]; if(!r) return null; const def=REASONS[kind].find(x=>x.k===r.k); return Object.assign({},r,{label:def?def.label:r.k,action:def?def.action:'Investigate'}); }
-function areaOf(bin,type){ if(bin===C.WAREHOUSE||type==='500'||/^500\s/.test(bin||'')) return 'Warehouse'; if(bin===C.SHOPFLOOR) return 'Shopfloor'; return 'Other'; }
+function areaOf(bin,type){ if(bin===C.WAREHOUSE||type==='500'||/^500\s/.test(bin||'')) return 'Warehouse'; if(bin===C.SHOPFLOOR) return 'Shopfloor'; if(bin===C.TTS) return 'TTS'; return 'Other'; }
 let fuKind='miss', fuAreaSel='', fuOpen=true, fuLimit=120, fuCur=null;
 function fuItems(){
   const rep=C.buildReport(SAP,ST.scans,ST.counted);
@@ -1144,7 +1158,7 @@ function renderFu(){
       '<div class="small">In total after the re-check: '+rc.stillMiss+' missing, '+rc.stillUnk+' not in SAP (the cards below show what still needs a reason).</div>';
     card.classList.remove('hidden');
   } else card.classList.add('hidden');
-  const areas=['','Warehouse','Shopfloor','Other'];
+  const areas=['','Warehouse','Shopfloor','TTS','Other'];
   $('fuArea').innerHTML=areas.map(a=>'<button class="chip'+(fuAreaSel===a?' on':'')+'" data-a="'+a+'">'+(a||'All areas')+'</button>').join('');
   const q=$('fuSearch').value.trim().toUpperCase();
   let list=items.filter(i=>(!fuAreaSel||i.area===fuAreaSel)&&(!fuOpen||!i.r)&&(!q||(i.hu+' '+i.where+' '+i.line).toUpperCase().includes(q)));
@@ -1206,16 +1220,17 @@ function renderRep(){
   const ex=SAP.excludedRows;
   $('sapInfo').innerHTML=[
     ['File',SAP.fileName],['Imported',SAP.importedAt.slice(0,16).replace('T',' ')],
-    ['SAP rows',SAP.rowCount],['Excluded rows ('+((SAP.cfg&&SAP.cfg.exclude.join(', '))||'610')+')',ex],['Pallets to count',Object.keys(SAP.pallets).length],
+    ['SAP rows',SAP.rowCount],['Excluded rows ('+((SAP.cfg&&SAP.cfg.exclude.join(', '))||'none')+')',ex],['Pallets to count',Object.keys(SAP.pallets).length],
     ['Locations',Object.keys(SAP.bins).length],['Stock rows without HU',SAP.noHU.length],['Scans recorded',ST.scans.length]
   ].map(r=>'<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td></tr>').join('');
-  const cfg=SAP.cfg||C.normCfg(ST.cfg);
+  const cfg=C.normCfg(SAP.cfg||ST.cfg);
   $('cfgEx').value=(ST.cfg?C.normCfg(ST.cfg):cfg).exclude.join(', ');
   $('cfgSf').value=(ST.cfg?C.normCfg(ST.cfg):cfg).shopfloor.join(', ');
+  $('cfgTt').value=(ST.cfg?C.normCfg(ST.cfg):cfg).tts.join(', ');
   $('verInfo').textContent='Pallet Count version '+APP_VERSION+' ('+APP_DATE+')';
 }
 $('cfgSave').addEventListener('click',()=>{
-  ST.cfg=C.normCfg({exclude:$('cfgEx').value,shopfloor:$('cfgSf').value}); saveState();
+  ST.cfg=C.normCfg({exclude:$('cfgEx').value,shopfloor:$('cfgSf').value,tts:$('cfgTt').value}); saveState();
   toast('Saved. Re-import the SAP export to apply');
 });
 $('clearSap').addEventListener('click',()=>{
@@ -1250,8 +1265,8 @@ function pCols(p){ return p?{'Product':p.products.join(', '),'Description':p.des
 function buildWorkbook(){
   const rep=C.buildReport(SAP,ST.scans,ST.counted);
   const missCounted=rep.missing.filter(m=>m.binCounted), missTodo=rep.missing.filter(m=>!m.binCounted);
-  const exTxt=(SAP.cfg&&SAP.cfg.exclude.join(', '))||'610';
-  const toBin=b=>b===C.WAREHOUSE?'WAREHOUSE (exact bin not recorded)':b===C.SHOPFLOOR?'SHOPFLOOR':b;
+  const exTxt=(SAP.cfg&&SAP.cfg.exclude.join(', '))||'none';
+  const toBin=b=>b===C.WAREHOUSE?'WAREHOUSE (exact bin not recorded)':b===C.SHOPFLOOR?'SHOPFLOOR':b===C.TTS?'610 TTS':b;
   const R=(kind,key)=>reasonOf(kind,key);
   const manualN=ST.scans.filter(s=>s.manual).length;
 
@@ -1272,7 +1287,7 @@ function buildWorkbook(){
 
   const summary=[
     ['Pallet count report',''],['SAP file',SAP.fileName],['SAP imported',SAP.importedAt.slice(0,16).replace('T',' ')],['Report created',localIso()],['App version',APP_VERSION+' ('+APP_DATE+')'],
-    ['',''],['SAP pallets (excl. '+exTxt+')',rep.total],['Matched',rep.matched.length],['  of which marked found by hand',manualN],['Wrong location',rep.misplaced.length],
+    ['',''],[exTxt==='none'?'SAP pallets':'SAP pallets (excl. '+exTxt+')',rep.total],['Matched',rep.matched.length],['  of which marked found by hand',manualN],['Wrong location',rep.misplaced.length],
     ['Missing (location counted)',missCounted.length],['Not yet counted (location not done)',missTodo.length],['Not in SAP',rep.unknown.length],
     ['Stock rows without HU (check manually)',SAP.noHU.length],['',''],
     ['Differences with a reason',actions.length-openN],['Differences still open',openN],['',''],
