@@ -15,6 +15,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.5/dist/iife/reader/index.js"></script>
 <style>
 :root{
   --bg:#EEF3F7; --card:#FFFFFF; --ink:#16202B; --muted:#5B6775; --line:#D3DAE2;
@@ -640,7 +641,7 @@ table.kv td:last-child{text-align:right;font-family:var(--cond);font-weight:600;
 const C = window.HUCore;
 const LS_SAP='hucount.sap.v1', LS_STATE='hucount.state.v1';
 let SAP=null;
-const APP_VERSION='8', APP_DATE='30 Sep 2026';
+const APP_VERSION='9', APP_DATE='17 Oct 2026';
 let ST={scans:[],counted:[],currentBin:'',extraBins:[],by:'',recentBins:[],backupAt:0,res:{},cfg:null,recheck:null};
 let downloads=null;
 if (window.claude && window.claude.use) {
@@ -853,15 +854,53 @@ async function startCam(){
     const F=Html5QrcodeSupportedFormats;
     qr=new Html5Qrcode('reader',{verbose:false,formatsToSupport:[F.CODE_128,F.CODE_39,F.EAN_13,F.ITF,F.QR_CODE,F.DATA_MATRIX],experimentalFeatures:{useBarCodeDetectorIfSupported:true}});
     await qr.start({facingMode:'environment'},{fps:12,qrbox:(w,h)=>{const box=$('reader').clientHeight||200;return {width:Math.floor(w*.92),height:Math.max(80,Math.min(Math.floor(h*.42),box-16))};},aspectRatio:1.6},
-      txt=>{const now=Date.now(); if(txt===lastCode&&now-lastAt<2500) return; lastCode=txt; lastAt=now; handleCode(txt);}, ()=>{});
+      txt=>onDecoded(txt), ()=>{});
     camOn=true; $('camBtn').classList.add('on');
+    zxStart();
   }catch(e){
     $('reader').classList.add('hidden'); qr=null;
     camErr('Camera could not start. Open this link directly in Safari and allow camera access, or use manual entry or a Bluetooth scanner.');
   }
 }
+/* Second, stronger decoder (zxing-cpp via WebAssembly) reading the same camera frames.
+   html5-qrcode keeps running unchanged; whichever decoder reads the label first wins. */
+function onDecoded(txt){ const now=Date.now(); if(txt===lastCode&&now-lastAt<2500) return; lastCode=txt; lastAt=now; handleCode(txt); }
+let zxTimer=null, zxBusy=false, zxCanvas=null, zxCtx=null, zxPrepared=false;
+function zxAvailable(){ return typeof ZXingWASM!=='undefined' && ZXingWASM.readBarcodes; }
+function zxStart(){
+  if(!zxAvailable()) return;
+  if(!zxPrepared){ try{ ZXingWASM.prepareZXingModule({fireImmediately:true}); }catch(e){} zxPrepared=true; }
+  if(!zxCanvas){ zxCanvas=document.createElement('canvas'); zxCtx=zxCanvas.getContext('2d',{willReadFrequently:true}); }
+  clearInterval(zxTimer); zxTimer=setInterval(zxTick,140);
+}
+function zxStop(){ clearInterval(zxTimer); zxTimer=null; }
+async function zxTick(){
+  if(zxBusy||!camOn) return;
+  const v=document.querySelector('#reader video'); if(!v||v.readyState<2||!v.videoWidth) return;
+  zxBusy=true;
+  try{
+    const vw=v.videoWidth, vh=v.videoHeight;
+    // read the part of the frame the user can see in the camera window (plus a margin)
+    const vis=Math.min(1,(($('reader').clientHeight||200)/(v.clientHeight||vh))*1.3);
+    const sh=Math.round(vh*vis), sy=Math.round((vh-sh)/2);
+    const scale=Math.min(1,1600/vw);
+    zxCanvas.width=Math.round(vw*scale); zxCanvas.height=Math.round(sh*scale);
+    zxCtx.drawImage(v,0,sy,vw,sh,0,0,zxCanvas.width,zxCanvas.height);
+    const img=zxCtx.getImageData(0,0,zxCanvas.width,zxCanvas.height);
+    const res=await ZXingWASM.readBarcodes(img,{formats:['Code128','Code39','QRCode','DataMatrix'],tryHarder:true,maxNumberOfSymbols:4});
+    const ok=res.filter(r=>r.isValid&&r.text);
+    if(ok.length){
+      // several labels in view: take the one nearest the centre of the window
+      const cx=zxCanvas.width/2, cy=zxCanvas.height/2;
+      const d=r=>{const p=r.position; if(!p) return 0; const x=(p.topLeft.x+p.bottomRight.x)/2, y=(p.topLeft.y+p.bottomRight.y)/2; return (x-cx)*(x-cx)+(y-cy)*(y-cy);};
+      ok.sort((a,b)=>d(a)-d(b));
+      onDecoded(ok[0].text);
+    }
+  }catch(e){}
+  finally{ zxBusy=false; }
+}
 function camErr(m){const el=$('camMsg');el.textContent=m;el.classList.remove('hidden');}
-async function stopCam(){ if(qr){ try{await qr.stop(); qr.clear();}catch(e){} } qr=null; camOn=false; $('reader').classList.add('hidden'); $('camBtn').classList.remove('on'); }
+async function stopCam(){ zxStop(); if(qr){ try{await qr.stop(); qr.clear();}catch(e){} } qr=null; camOn=false; $('reader').classList.add('hidden'); $('camBtn').classList.remove('on'); }
 $('camBtn').addEventListener('click',()=>{ ensureAudio(); camOn?stopCam():startCam(); });
 
 $('undoBtn').addEventListener('click',()=>{
